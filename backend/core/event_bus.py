@@ -52,11 +52,6 @@ class EventType(Enum):
     FUTURES_ORDER_CANCELLED = "futures_order_cancelled"
     FUTURES_ORDER_REJECTED = "futures_order_rejected"
     FUTURES_ORDER_EXPIRED = "futures_order_expired"
-    ORDER_FILLED = "order_filled"
-    ORDER_PARTIALLY_FILLED = "order_partially_filled"
-    ORDER_CANCELLED = "order_cancelled"
-    ORDER_REJECTED = "order_rejected"
-    ORDER_EXPIRED = "order_expired"
 
     # Portfolio
     PORTFOLIO_UPDATED = "portfolio_updated"
