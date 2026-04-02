@@ -1,0 +1,176 @@
+name: Deploy Demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Contabo
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Build frontend on CI runner (fast CPU, npm cache) ───────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+        run: |
+          npm ci
+          npm run build
+
+      # ── Write Firebase credentials to a local file ─────────────────
+      # Upload via SCP so the SSH script never needs to handle the raw JSON
+      # (avoids newline/quoting issues when passing JSON through SSH envs).
+      - name: Write Firebase credentials file
+        run: |
+          if [ -n "$FIREBASE_CREDS" ]; then
+            printf '%s' "$FIREBASE_CREDS" > firebase-credentials.json
+          else
+            printf '{}' > firebase-credentials.json
+            echo "WARNING: FIREBASE_CREDENTIALS_JSON secret not set — using empty credentials"
+          fi
+        env:
+          FIREBASE_CREDS: ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
+
+      # ── Package backend + pre-built frontend ────────────────────────
+      - name: Create archive
+        run: |
+          tar czf alphasync-demo.tar.gz \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.env' \
+            --exclude='*.db' \
+            --exclude='uploads/avatars/*' \
+            backend \
+            frontend/dist \
+            frontend/nginx.demo.conf \
+            frontend/Dockerfile.demo.prebuilt \
+            frontend/.dockerignore \
+            deploy/nginx/demo.alphasync.app.conf \
+            docker-compose.demo.yml
+          ls -lh alphasync-demo.tar.gz
+
+      # ── Upload archive + credentials to server ─────────────────────
+      - name: Upload to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          source: "alphasync-demo.tar.gz,firebase-credentials.json"
+          target: "/opt/alphasync-demo"
+
+      # ── Deploy on server ────────────────────────────────────────────
+      # No `envs:` — credentials were uploaded as a file above.
+      # set -eo pipefail: exits on error, fails on bad pipes. No -u
+      # (avoids "unbound variable" crashes when optional vars are absent).
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          command_timeout: 12m
+          script: |
+            set -eo pipefail
+            DEPLOY_DIR="/opt/alphasync-demo"
+            DOMAIN="demo.alphasync.app"
+
+            echo "=== Preparing deploy directory ==="
+            mkdir -p "${DEPLOY_DIR}"
+            cd "${DEPLOY_DIR}"
+
+            echo "=== Extracting archive ==="
+            tar xzf alphasync-demo.tar.gz
+            rm -f alphasync-demo.tar.gz
+
+            echo "=== Verifying uploaded files ==="
+            ls -la frontend/dist/ | head -5 || echo "WARNING: frontend/dist missing"
+            test -f firebase-credentials.json && echo "Firebase credentials present" || echo "WARNING: firebase-credentials.json missing"
+
+            echo "=== Building images (frontend=COPY only, backend uses pip cache) ==="
+            DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 \
+              docker compose -p alphasync-demo -f docker-compose.demo.yml \
+              build --parallel
+
+            echo "=== Stopping old containers ==="
+            docker compose -p alphasync-demo -f docker-compose.demo.yml down --remove-orphans 2>/dev/null || true
+
+            echo "=== Starting containers ==="
+            docker compose -p alphasync-demo -f docker-compose.demo.yml up -d
+
+            echo "=== Waiting for backend health (max 180s) ==="
+            HEALTHY=0
+            for i in $(seq 1 60); do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' alphasync-demo-backend 2>/dev/null || echo "unknown")
+              if [ "${STATUS}" = "healthy" ]; then
+                echo "Backend healthy after $((i * 3))s!"
+                HEALTHY=1
+                break
+              fi
+              STATE=$(docker inspect --format='{{.State.Status}}' alphasync-demo-backend 2>/dev/null || echo "unknown")
+              if [ "${STATE}" = "exited" ] || [ "${STATE}" = "dead" ]; then
+                echo "ERROR: Backend container crashed. Last 80 log lines:"
+                docker logs alphasync-demo-backend --tail 80
+                exit 1
+              fi
+              echo "  waiting... ($((i * 3))s elapsed, status: ${STATUS})"
+              sleep 3
+            done
+
+            if [ "${HEALTHY}" -eq 0 ]; then
+              echo "ERROR: Backend did not become healthy in 180s. Last 80 log lines:"
+              docker logs alphasync-demo-backend --tail 80
+              exit 1
+            fi
+
+            echo "=== Installing Nginx config ==="
+            NGINX_CONF="/etc/nginx/sites-enabled/${DOMAIN}.conf"
+            cp deploy/nginx/demo.alphasync.app.conf "${NGINX_CONF}"
+
+            mkdir -p /etc/nginx/ssl-certificates
+            if [ ! -f "/etc/nginx/ssl-certificates/${DOMAIN}.crt" ]; then
+              echo "Creating self-signed SSL cert..."
+              openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout "/etc/nginx/ssl-certificates/${DOMAIN}.key" \
+                -out "/etc/nginx/ssl-certificates/${DOMAIN}.crt" \
+                -subj "/CN=${DOMAIN}" 2>/dev/null
+            fi
+
+            if nginx -t 2>&1; then
+              systemctl reload nginx
+              echo "Nginx reloaded!"
+            else
+              echo "WARNING: Nginx config test failed — skipping reload"
+            fi
+
+            echo ""
+            echo "=== Final status ==="
+            docker compose -p alphasync-demo -f docker-compose.demo.yml ps
+            docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
+
+            docker image prune -f &>/dev/null &
+
+            echo "Deploy complete! https://${DOMAIN}"

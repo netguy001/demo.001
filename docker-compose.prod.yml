@@ -1,0 +1,110 @@
+# ============================================================
+#  AlphaSync — Production Docker Compose (Contabo VPS)
+#  Domain: www.alphasync.app
+# ============================================================
+#  CloudPanel manages Nginx (ports 80/443) and SSL certificates.
+#  Docker must NOT bind to ports 80 or 443.
+#
+#  Usage:
+#    export IMAGE_PREFIX=ghcr.io/netguy001/alphasync
+#    export IMAGE_TAG=latest
+#    docker compose -f docker-compose.prod.yml up -d
+# ============================================================
+
+services:
+  # ── Backend API (FastAPI) ──────────────────────────────────
+  backend:
+    image: ${IMAGE_PREFIX:-ghcr.io/netguy001/alphasync}-backend:${IMAGE_TAG:-latest}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - uploads:/app/uploads
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-alphasync}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-alphasync}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CORS_ORIGINS=["https://www.alphasync.app","https://alphasync.app"]
+      - ZEBU_WS_URL=${ZEBU_WS_URL:-wss://go.mynt.in/NorenWSTP/}
+      - ZEBU_API_URL=${ZEBU_API_URL:-https://go.mynt.in/NorenWClientTP}
+      - ZEBU_API_SECRET=${ZEBU_API_SECRET:-}
+      - ZEBU_VENDOR_CODE=${ZEBU_VENDOR_CODE:-}
+      - ZEBU_REDIRECT_URI=https://www.alphasync.app/broker/callback
+      - BROKER_ENCRYPTION_KEY=${BROKER_ENCRYPTION_KEY}
+      - SIMULATION_MODE=${SIMULATION_MODE:-false}
+      - FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
+      - ADMIN_EMAIL_ALLOWLIST=${ADMIN_EMAIL_ALLOWLIST:-["meganath1025@gmail.com"]}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - alphasync
+
+  # ── Frontend (React via Nginx) ─────────────────────────────
+  frontend:
+    image: ${IMAGE_PREFIX:-ghcr.io/netguy001/alphasync}-frontend:${IMAGE_TAG:-latest}
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - alphasync
+
+  # ── PostgreSQL 16 ──────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-alphasync}
+      POSTGRES_USER: ${POSTGRES_USER:-alphasync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-alphasync}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alphasync
+
+  # ── Redis 7 ────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    volumes:
+      - redisdata:/data
+    command: >-
+      redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - alphasync
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+
+
+networks:
+  alphasync:
+    driver: bridge

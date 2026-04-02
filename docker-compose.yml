@@ -1,0 +1,75 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://alphasync:alphasync@db:5432/alphasync
+      - ZEROLOSS_CONFIDENCE_THRESHOLD=${ZEROLOSS_CONFIDENCE_THRESHOLD:-75}
+      - ZEROLOSS_SYMBOLS=${ZEROLOSS_SYMBOLS:-RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK}
+      - REDIS_URL=redis://redis:6379/0
+      - CORS_ORIGINS=${CORS_ORIGINS:-["http://localhost:5173","http://localhost:3000"]}
+      - ZEBU_WS_URL=${ZEBU_WS_URL:-wss://go.mynt.in/NorenWSTP/}
+      - ZEBU_API_SECRET=${ZEBU_API_SECRET:-}
+      - ZEBU_VENDOR_CODE=${ZEBU_VENDOR_CODE:-}
+      - ZEBU_REDIRECT_URI=${ZEBU_REDIRECT_URI:-http://localhost:5173/broker/callback}
+      - ZEBU_API_URL=${ZEBU_API_URL:-https://go.mynt.in/NorenWClientTP}
+      - BROKER_ENCRYPTION_KEY=${BROKER_ENCRYPTION_KEY:-alphasync-broker-encryption-default-change-in-production-!!}
+      - SIMULATION_MODE=${SIMULATION_MODE:-true}
+      - FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./backend:/app
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}
+        - VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
+        - VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
+        - VITE_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}
+        - VITE_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}
+        - VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: alphasync
+      POSTGRES_USER: alphasync
+      POSTGRES_PASSWORD: alphasync
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
