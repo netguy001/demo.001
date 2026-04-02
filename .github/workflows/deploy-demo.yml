@@ -11,9 +11,13 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  # GHCR image paths (lowercased owner required by GHCR)
-  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/alphasync-demo-backend
-  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/alphasync-demo-frontend
+  # Image names unique to THIS repo (demo.001).
+  # Existing alphasync-demo-backend/frontend are linked to netguy001/demo-alpha
+  # and cannot be pushed to by this repo's GITHUB_TOKEN.
+  # Local docker-compose tags (alphasync-demo-backend:latest) are unaffected —
+  # they are applied via `docker tag` on the server after pull.
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/demo001-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/demo001-frontend
 
 # ── Job 1a: Build & push backend image ──────────────────────────────────────
 jobs:
