@@ -44,6 +44,19 @@ DEFAULT_WATCHLIST_SEEDS = [
 
 DEFAULT_WATCHLIST_NAMES = {name.strip().lower() for name, _ in DEFAULT_WATCHLIST_SEEDS}
 
+# Legacy auto-seeded lists from previous deployments. These should be removed
+# so users only see the current default lists plus their own custom watchlists.
+LEGACY_DEFAULT_WATCHLIST_NAMES = {
+    'my watchlist',
+    'bank nifty',
+    'nifty pharma',
+    'nifty auto',
+    'nifty fmcg',
+    'nifty metal',
+    'nifty next 50',
+    'india vix',
+}
+
 
 def _default_watchlist_sort_key(name: str) -> tuple[int, str]:
     normalized = str(name or '').strip().lower()
@@ -106,6 +119,29 @@ async def _seed_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID):
     return await _seed_missing_default_watchlists(db, user_uuid, set())
 
 
+async def _remove_legacy_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID, watchlist_rows):
+    legacy_rows = [row for row in watchlist_rows if str(row[1]).strip().lower() in LEGACY_DEFAULT_WATCHLIST_NAMES]
+    if not legacy_rows:
+        return watchlist_rows
+
+    legacy_ids = [str(row[0]) for row in legacy_rows]
+    if legacy_ids:
+        id_list = ','.join(f":id{i}" for i in range(len(legacy_ids)))
+        params = {f"id{i}": legacy_ids[i] for i in range(len(legacy_ids))}
+        params["uid"] = str(user_uuid)
+        await db.execute(
+            text(f"DELETE FROM watchlist_items WHERE watchlist_id IN ({id_list})"),
+            params,
+        )
+        await db.execute(
+            text(f"DELETE FROM watchlists WHERE id IN ({id_list}) AND user_id IN (:uid, :uid_hex)"),
+            {**params, "uid_hex": user_uuid.hex},
+        )
+        await db.commit()
+
+    return [row for row in watchlist_rows if row not in legacy_rows]
+
+
 def _normalize_uuid(value: str, field_name: str) -> str:
     try:
         return str(uuid.UUID(str(value)))
@@ -141,6 +177,9 @@ async def get_watchlists(
         )
         watchlist_rows = result.fetchall()
 
+        existing_names = {str(row[1]).strip().lower() for row in watchlist_rows}
+
+        watchlist_rows = await _remove_legacy_default_watchlists(db, user_uuid, watchlist_rows)
         existing_names = {str(row[1]).strip().lower() for row in watchlist_rows}
 
         if not watchlist_rows:

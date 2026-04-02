@@ -4,6 +4,22 @@ import toast from 'react-hot-toast';
 import { isMcxSymbol } from '../utils/constants';
 
 const STORAGE_KEY = 'alphasync_watchlists';
+const LEGACY_DEFAULT_WATCHLIST_NAMES = new Set([
+    'my watchlist',
+    'bank nifty',
+    'nifty pharma',
+    'nifty auto',
+    'nifty fmcg',
+    'nifty metal',
+    'nifty next 50',
+    'india vix',
+]);
+
+const normalizeWatchlistName = (name = '') => String(name || '').trim().toLowerCase();
+
+const isLegacyDefaultWatchlist = (watchlist) => LEGACY_DEFAULT_WATCHLIST_NAMES.has(normalizeWatchlistName(watchlist?.name));
+
+const sanitizeWatchlists = (watchlists = []) => (watchlists || []).filter((wl) => !isLegacyDefaultWatchlist(wl));
 
 /**
  * Helper: Save watchlists to localStorage for persistence across refreshes
@@ -139,13 +155,17 @@ export const useWatchlistStore = create((set, get) => ({
         // 1. Try to load from localStorage first (fast cache)
         const cached = loadFromStorage();
         if (cached && cached.watchlists.length > 0) {
-            set({ watchlists: cached.watchlists, activeId: cached.activeId });
+            const sanitizedCached = sanitizeWatchlists(cached.watchlists);
+            const nextActiveId = sanitizedCached.some((w) => w.id === cached.activeId)
+                ? cached.activeId
+                : sanitizedCached[0]?.id ?? null;
+            set({ watchlists: sanitizedCached, activeId: nextActiveId });
         }
 
         try {
             // 2. Try to sync with server
             const res = await api.get('/watchlist');
-            const wls = res.data.watchlists || [];
+            const wls = sanitizeWatchlists(res.data.watchlists || []);
             if (wls.length > 0) {
                 const nextActiveId = cached?.activeId && wls.some((w) => w.id === cached.activeId)
                     ? cached.activeId
