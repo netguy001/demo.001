@@ -35,7 +35,7 @@ def _canonical_watchlist_symbol(symbol: str) -> str:
 
 DEFAULT_WATCHLIST_SEEDS = [
     (
-        "My Watchlist",
+        "Watchlist 1",
         [],
     ),
     (
@@ -156,7 +156,7 @@ async def get_watchlists(
 
         if not watchlist_rows or (
             len(watchlist_rows) == 1
-            and str(watchlist_rows[0][1]).strip().lower() == "my watchlist"
+            and str(watchlist_rows[0][1]).strip().lower() in ("my watchlist", "watchlist 1")
         ):
             seeded = await _seed_default_watchlists(db, user_uuid)
             return {"watchlists": seeded}

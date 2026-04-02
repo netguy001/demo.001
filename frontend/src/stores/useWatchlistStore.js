@@ -155,7 +155,7 @@ export const useWatchlistStore = create((set, get) => ({
                 persistToStorage(wls, nextActiveId);
             } else {
                 // Create default watchlist on server
-                const created = await api.post('/watchlist', { name: 'My Watchlist' });
+                const created = await api.post('/watchlist', { name: 'Watchlist 1' });
                 const newWl = { ...created.data, items: [] };
                 set({ watchlists: [newWl], activeId: newWl.id });
                 persistToStorage([newWl], newWl.id);
