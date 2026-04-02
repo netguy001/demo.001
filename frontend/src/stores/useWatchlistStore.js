@@ -165,7 +165,7 @@ export const useWatchlistStore = create((set, get) => ({
             // On API error, use localStorage if available, otherwise create local fallback
             if (!cached || cached.watchlists.length === 0) {
                 const defaultId = `local_${Date.now()}`;
-                const defaultWl = { id: defaultId, name: 'My Watchlist', items: [] };
+                const defaultWl = { id: defaultId, name: 'Watchlist 1', items: [] };
                 set({ watchlists: [defaultWl], activeId: defaultId });
                 persistToStorage([defaultWl], defaultId);
             }

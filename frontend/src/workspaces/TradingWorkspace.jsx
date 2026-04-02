@@ -391,9 +391,9 @@ export default function TradingWorkspace() {
                 watchlistVisible ? (
                     <ResizablePanel
                         side="left"
-                        defaultSize={260}
-                        minSize={200}
-                        maxSize={400}
+                        defaultSize={300}
+                        minSize={220}
+                        maxSize={460}
                         className="terminal-area-watchlist hidden lg:flex"
                     >
                         {watchlistEl}

@@ -8,6 +8,7 @@ from database.connection import get_db
 from models.user import User
 from routes.auth import get_current_user
 
+
 router = APIRouter(prefix="/api/watchlist", tags=["Watchlist"])
 
 
@@ -34,50 +35,27 @@ def _canonical_watchlist_symbol(symbol: str) -> str:
 
 
 DEFAULT_WATCHLIST_SEEDS = [
-    (
-        "Watchlist 1",
-        [],
-    ),
-    (
-        "NIFTY 50",
-        [
-            "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
-            "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BHARTIARTL", "BPCL",
-            "BRITANNIA", "CIPLA", "COALINDIA", "DIVISLAB", "DRREDDY",
-            "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE",
-            "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "INDUSINDBK",
-            "INFY", "ITC", "JSWSTEEL", "KOTAKBANK", "LT",
-            "M&M", "MARUTI", "NESTLEIND", "NTPC", "ONGC",
-            "POWERGRID", "RELIANCE", "SBIN", "SBILIFE", "SHREECEM",
-            "SUNPHARMA", "TATAMOTORS", "TATACONSUM", "TATASTEEL", "TCS",
-            "TECHM", "TITAN", "ULTRACEMCO", "UPL", "WIPRO",
-        ],
-    ),
-    (
-        "BANKNIFTY",
-        [
-            "HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN",
-            "INDUSINDBK", "BANDHANBNK", "FEDERALBNK", "IDFCFIRSTB", "AUBANK",
-            "PNB", "BANKBARODA",
-        ],
-    ),
-    (
-        "SENSEX",
-        [
-            "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
-            "LT", "SBIN", "ITC", "BHARTIARTL", "AXISBANK",
-            "BAJFINANCE", "KOTAKBANK", "HCLTECH", "WIPRO", "MARUTI",
-            "SUNPHARMA", "TITAN", "BAJAJFINSV", "POWERGRID", "NTPC",
-            "TATASTEEL", "ASIANPAINT", "NESTLEIND", "M&M", "ULTRACEMCO",
-            "TATAMOTORS", "DRREDDY", "ADANIPORTS", "JSWSTEEL", "TATACONSUM",
-        ],
-    ),
+    ("Watchlist 1", []),
+    ("NIFTY 50", ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", "ITC", "LT", "AXISBANK", "BHARTIARTL"]),
+    ("BANK NIFTY", ["HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN", "INDUSINDBK", "BANDHANBNK", "AUBANK", "FEDERALBNK"]),
+    ("SENSEX", ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "LT", "SBIN", "ITC", "AXISBANK", "BHARTIARTL"]),
+    ("NIFTY IT", ["INFY", "TCS", "HCLTECH", "TECHM", "WIPRO", "LTIM", "PERSISTENT"]),
+    ("NIFTY PHARMA", ["SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "LUPIN"]),
+    ("NIFTY AUTO", ["MARUTI", "M&M", "TATAMOTORS", "EICHERMOT", "BAJAJ-AUTO", "TVSMOTOR"]),
+    ("NIFTY FMCG", ["HINDUNILVR", "ITC", "NESTLEIND", "BRITANNIA", "DABUR"]),
+    ("NIFTY METAL", ["TATASTEEL", "JSWSTEEL", "HINDALCO", "SAIL", "JINDALSTEL"]),
+    ("NIFTY NEXT 50", ["ADANIENT", "ADANIPORTS", "BAJFINANCE", "BEL", "COALINDIA", "GRASIM", "HDFCLIFE", "HINDALCO", "HINDPETRO", "HINDZINC"]),
+    ("INDIA VIX", []),
 ]
 
+DEFAULT_WATCHLIST_NAMES = {name.strip().lower() for name, _ in DEFAULT_WATCHLIST_SEEDS}
 
-async def _seed_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID):
+
+async def _seed_missing_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID, existing_names: set[str]):
     seeded = []
     for name, symbols in DEFAULT_WATCHLIST_SEEDS:
+        if name.strip().lower() in existing_names:
+            continue
         watchlist_id = uuid.uuid4().hex
         await db.execute(
             text(
@@ -115,8 +93,13 @@ async def _seed_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID):
 
         seeded.append({"id": watchlist_id, "name": name, "items": items})
 
-    await db.commit()
+    if seeded:
+        await db.commit()
     return seeded
+
+
+async def _seed_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID):
+    return await _seed_missing_default_watchlists(db, user_uuid, set())
 
 
 def _normalize_uuid(value: str, field_name: str) -> str:
@@ -154,12 +137,20 @@ async def get_watchlists(
         )
         watchlist_rows = result.fetchall()
 
-        if not watchlist_rows or (
-            len(watchlist_rows) == 1
-            and str(watchlist_rows[0][1]).strip().lower() in ("my watchlist", "watchlist 1")
-        ):
+        existing_names = {str(row[1]).strip().lower() for row in watchlist_rows}
+
+        if not watchlist_rows:
             seeded = await _seed_default_watchlists(db, user_uuid)
             return {"watchlists": seeded}
+
+        # If this is still a default-only account, fill in any missing default lists
+        if existing_names.issubset(DEFAULT_WATCHLIST_NAMES.union({"my watchlist"})):
+            await _seed_missing_default_watchlists(db, user_uuid, existing_names)
+            result = await db.execute(
+                text("SELECT id, name, created_at FROM watchlists WHERE user_id IN (:uid_dash, :uid_hex) ORDER BY created_at"),
+                {"uid_dash": user_id_dash, "uid_hex": user_id_hex},
+            )
+            watchlist_rows = result.fetchall()
 
         wl_list = []
         for row in watchlist_rows:

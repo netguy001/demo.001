@@ -1,16 +1,15 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import WatchlistItem from './WatchlistItem';
 import AddSymbolModal from './AddSymbolModal';
 import WatchlistSidebar from './WatchlistSidebar';
+import Modal from '../ui/Modal';
 import Skeleton from '../ui/Skeleton';
 import { cn } from '../../utils/cn';
 import {
-    Search, Plus, X,
-    Pencil, Check, Trash2, MoreVertical, Menu,
+    Search, Plus,
+    CheckCircle2, Menu, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useWatchlistStore } from '../../stores/useWatchlistStore';
-import { cleanSymbol } from '../../utils/formatters';
 
 const getPriceForSymbol = (prices, symbol) => {
     const raw = String(symbol || '').trim();
@@ -22,56 +21,6 @@ const getPriceForSymbol = (prices, symbol) => {
 
     return prices[upper] ?? prices[withNs] ?? prices[withoutNs] ?? {};
 };
-
-// ── Tab dots menu (portal — never clipped, never eaten by parent onClick) ──────
-function TabMenu({ wl, anchorRect, onRename, onDelete, onClose, canDelete }) {
-    const menuRef = useRef(null);
-
-    // Close on outside click
-    useEffect(() => {
-        const handler = (e) => {
-            if (menuRef.current && !menuRef.current.contains(e.target)) onClose();
-        };
-        const id = setTimeout(() => document.addEventListener('mousedown', handler), 0);
-        return () => {
-            clearTimeout(id);
-            document.removeEventListener('mousedown', handler);
-        };
-    }, [onClose]);
-
-    const top = anchorRect.bottom + 4;
-    const left = anchorRect.left;
-
-    return createPortal(
-        <div
-            ref={menuRef}
-            style={{ position: 'fixed', top, left, zIndex: 9999, width: 148 }}
-            className="bg-surface-900 border border-edge/10 rounded-lg shadow-2xl overflow-hidden animate-slide-in"
-            onMouseDown={(e) => e.stopPropagation()}
-        >
-            <button
-                onClick={() => { onRename(); onClose(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-heading hover:bg-surface-800 transition-colors text-left"
-            >
-                <Pencil className="w-3.5 h-3.5 flex-shrink-0" />
-                Rename
-            </button>
-            {canDelete && (
-                <>
-                    <div className="border-t border-edge/10 mx-2" />
-                    <button
-                        onClick={() => { onDelete(); onClose(); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-red-500 hover:bg-red-500/10 transition-colors text-left"
-                    >
-                        <Trash2 className="w-3.5 h-3.5 flex-shrink-0" />
-                        Delete watchlist
-                    </button>
-                </>
-            )}
-        </div>,
-        document.getElementById('portal-root') || document.body
-    );
-}
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function Watchlist({
@@ -101,20 +50,11 @@ export default function Watchlist({
 
     // ── UI state ──────────────────────────────────────────────────────────────
     const [modalOpen, setModalOpen] = useState(false);
+    const [createModalOpen, setCreateModalOpen] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
-
-    // Rename state
-    const [renamingId, setRenamingId] = useState(null);
-    const [renameValue, setRenameValue] = useState('');
-    const renameInputRef = useRef(null);
-
-    // New watchlist creation
-    const [isCreating, setIsCreating] = useState(false);
     const [newWlName, setNewWlName] = useState('');
-    const newWlInputRef = useRef(null);
-
-    // Tab dots menu
-    const [menuState, setMenuState] = useState(null); // { wlId, rect }
+    const [tabScroll, setTabScroll] = useState({ left: false, right: false });
+    const tabsRef = useRef(null);
 
     // Drag-and-drop state
     const [dragIndex, setDragIndex] = useState(null);
@@ -123,13 +63,7 @@ export default function Watchlist({
     const scrollEl = useRef(null);
 
     // ── Focus helpers ─────────────────────────────────────────────────────────
-    useEffect(() => {
-        if (renamingId) renameInputRef.current?.select();
-    }, [renamingId]);
-
-    useEffect(() => {
-        if (isCreating) newWlInputRef.current?.focus();
-    }, [isCreating]);
+    const sortedWatchlists = useMemo(() => watchlists, [watchlists]);
 
     // ── Fetch prices when item count changes ──────────────────────────────────
     const itemCountRef = useRef(items.length);
@@ -140,200 +74,127 @@ export default function Watchlist({
         }
     }, [items.length, fetchPrices]);
 
+    const updateTabScroll = useCallback(() => {
+        const el = tabsRef.current;
+        if (!el) return;
+        const canScrollLeft = el.scrollLeft > 4;
+        const canScrollRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+        setTabScroll((prev) => (
+            prev.left === canScrollLeft && prev.right === canScrollRight
+                ? prev
+                : { left: canScrollLeft, right: canScrollRight }
+        ));
+    }, []);
+
+    useEffect(() => {
+        updateTabScroll();
+        const el = tabsRef.current;
+        if (!el) return;
+        const onScroll = () => updateTabScroll();
+        el.addEventListener('scroll', onScroll, { passive: true });
+        window.addEventListener('resize', updateTabScroll);
+        return () => {
+            el.removeEventListener('scroll', onScroll);
+            window.removeEventListener('resize', updateTabScroll);
+        };
+    }, [sortedWatchlists.length, updateTabScroll]);
+
     // ── Handlers ──────────────────────────────────────────────────────────────
     const handleAddSymbol = useCallback((symbol, exchange) => {
         addItem(symbol, exchange);
         setModalOpen(false);
     }, [addItem]);
 
-    const handleStartRename = useCallback((wl) => {
-        setRenamingId(wl.id);
-        setRenameValue(wl.name);
-    }, []);
-
-    const handleRenameSubmit = useCallback(() => {
-        if (renamingId && renameValue.trim()) {
-            renameWatchlist(renamingId, renameValue.trim());
-        }
-        setRenamingId(null);
-    }, [renamingId, renameValue, renameWatchlist]);
-
-    const handleRenameKeyDown = useCallback((e) => {
-        if (e.key === 'Enter') handleRenameSubmit();
-        if (e.key === 'Escape') setRenamingId(null);
-    }, [handleRenameSubmit]);
-
     const handleCreateSubmit = useCallback(async () => {
-        const name = newWlName.trim() || 'New Watchlist';
+        const name = newWlName.trim() || `Watchlist ${watchlists.length + 1}`;
         await createWatchlist(name);
-        setIsCreating(false);
+        setCreateModalOpen(false);
         setNewWlName('');
-    }, [newWlName, createWatchlist]);
+    }, [newWlName, createWatchlist, watchlists.length]);
 
     const handleCreateKeyDown = useCallback((e) => {
         if (e.key === 'Enter') handleCreateSubmit();
-        if (e.key === 'Escape') { setIsCreating(false); setNewWlName(''); }
+        if (e.key === 'Escape') { setCreateModalOpen(false); setNewWlName(''); }
     }, [handleCreateSubmit]);
-
-    // Open dots menu — capture button rect for portal positioning
-    const handleDotsClick = useCallback((e, wlId) => {
-        e.stopPropagation();
-        e.preventDefault();
-        const rect = e.currentTarget.getBoundingClientRect();
-        setMenuState(prev =>
-            prev?.wlId === wlId ? null : { wlId, rect }
-        );
-    }, []);
-
-    const activeMenu = menuState
-        ? watchlists.find(w => w.id === menuState.wlId)
-        : null;
 
     return (
         <div className="flex flex-col h-full border-r border-edge/5 bg-surface-900/60">
 
-            {/* ── TAB BAR WITH HAMBURGER MENU ───────────────────────────── */}
-            <div
-                className="flex items-center border-b border-edge/5 bg-surface-900/40 overflow-x-auto flex-shrink-0"
-                style={{ scrollbarWidth: 'none', minHeight: 44 }}
-            >
-                {/* Hamburger Menu */}
+            {/* ── TOP SEARCH BAR ───────────────────────────────────────── */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-edge/5 bg-surface-900/40 flex-shrink-0">
                 <button
                     onClick={() => setSidebarOpen(true)}
-                    className="flex-shrink-0 px-3 py-2.5 text-gray-600 hover:text-gray-400 hover:bg-surface-800/40 transition-colors"
-                    title="Watchlist menu"
+                    className="flex-shrink-0 h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:text-heading hover:bg-surface-800/60 transition-colors"
+                    title="Watchlists"
                 >
                     <Menu className="w-4 h-4" />
                 </button>
 
-                {/* Watchlist Tabs */}
-                <div className="flex items-center flex-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                <button
+                    onClick={() => setModalOpen(true)}
+                    className="flex-1 h-9 px-3 rounded-lg border border-edge/10 bg-surface-800/35 text-left flex items-center gap-2 text-gray-500 hover:text-heading hover:border-edge/20 transition-colors"
+                    title="Search or add symbol"
+                >
+                    <Search className="w-4 h-4 flex-shrink-0" />
+                    <span className="truncate text-sm">Search or add symbol…</span>
+                </button>
+
+                <button
+                    onClick={() => setCreateModalOpen(true)}
+                    className="flex-shrink-0 h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:text-primary-600 hover:bg-primary-500/10 transition-colors"
+                    title="New watchlist"
+                >
+                    <Plus className="w-4 h-4" />
+                </button>
+            </div>
+
+            {/* ── TAB ROW WITH OVERFLOW ARROWS ────────────────────────── */}
+            <div className="flex items-center border-b border-edge/5 bg-surface-900/35 flex-shrink-0 h-10">
+                {tabScroll.left && (
+                    <button
+                        onClick={() => tabsRef.current?.scrollBy({ left: -180, behavior: 'smooth' })}
+                        className="flex-shrink-0 h-full w-8 flex items-center justify-center text-gray-500 hover:text-heading hover:bg-surface-800/50 transition-colors"
+                        aria-label="Scroll watchlists left"
+                    >
+                        <ChevronLeft className="w-4 h-4" />
+                    </button>
+                )}
+
+                <div
+                    ref={tabsRef}
+                    className="flex-1 h-full overflow-x-auto overflow-y-hidden no-scrollbar flex items-stretch"
+                    style={{ scrollbarWidth: 'none' }}
+                    onScroll={updateTabScroll}
+                >
                     {watchlists.map((wl) => {
                         const isActive = wl.id === activeId;
-                        const isRenaming = renamingId === wl.id;
-
                         return (
-                            <div
+                            <button
                                 key={wl.id}
+                                onClick={() => setActiveWatchlist(wl.id)}
                                 className={cn(
-                                    'relative flex items-center flex-shrink-0 group/tab border-r border-edge/5',
+                                    'px-4 h-full flex items-center justify-center flex-shrink-0 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
                                     isActive
-                                        ? 'bg-surface-800/80 border-b-2 border-b-primary-500'
-                                        : 'hover:bg-surface-800/40 cursor-pointer',
+                                        ? 'text-primary-600 border-primary-500 bg-primary-500/5'
+                                        : 'text-gray-500 border-transparent hover:text-heading hover:bg-surface-800/30'
                                 )}
-                                style={{ maxWidth: 130 }}
-                                onClick={() => {
-                                    if (!isRenaming) setActiveWatchlist(wl.id);
-                                }}
                             >
-                                {isRenaming ? (
-                                    <input
-                                        ref={renameInputRef}
-                                        value={renameValue}
-                                        onChange={(e) => setRenameValue(e.target.value)}
-                                        onKeyDown={handleRenameKeyDown}
-                                        onBlur={handleRenameSubmit}
-                                        maxLength={24}
-                                        className="w-24 px-2 py-1.5 text-[11px] font-semibold bg-transparent text-primary-600 focus:outline-none"
-                                        onClick={(e) => e.stopPropagation()}
-                                    />
-                                ) : (
-                                    <span
-                                        className={cn(
-                                            'px-3 py-2.5 text-[11px] font-semibold truncate select-none leading-none',
-                                            isActive ? 'text-heading' : 'text-gray-500',
-                                        )}
-                                        onDoubleClick={(e) => {
-                                            e.stopPropagation();
-                                            handleStartRename(wl);
-                                        }}
-                                        title={wl.name}
-                                    >
-                                        {wl.name}
-                                    </span>
-                                )}
-
-                                {/* Dots button */}
-                                {isActive && !isRenaming && (
-                                    <button
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onClick={(e) => handleDotsClick(e, wl.id)}
-                                        className={cn(
-                                            'pr-1.5 pl-0.5 py-2 text-gray-600 hover:text-gray-700 flex-shrink-0',
-                                            'opacity-0 group-hover/tab:opacity-100 transition-opacity',
-                                            menuState?.wlId === wl.id && 'opacity-100 text-gray-600',
-                                        )}
-                                        title="Watchlist options"
-                                    >
-                                        <MoreVertical className="w-3.5 h-3.5" />
-                                    </button>
-                                )}
-                            </div>
+                                {wl.name}
+                            </button>
                         );
                     })}
                 </div>
 
-                {/* + New watchlist */}
-                {isCreating ? (
-                    <div className="flex items-center flex-shrink-0 px-1.5 gap-1 border-r border-edge/5">
-                        <input
-                            ref={newWlInputRef}
-                            value={newWlName}
-                            onChange={(e) => setNewWlName(e.target.value)}
-                            onKeyDown={handleCreateKeyDown}
-                            onBlur={handleCreateSubmit}
-                            placeholder="Name…"
-                            maxLength={24}
-                            className="w-20 px-1.5 py-1 text-[11px] bg-surface-800/80 border border-primary-500/40 rounded text-heading placeholder-gray-600 focus:outline-none"
-                        />
-                        <button
-                            onMouseDown={(e) => { e.preventDefault(); handleCreateSubmit(); }}
-                            className="text-primary-600 hover:text-primary-500 p-0.5"
-                        >
-                            <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                            onMouseDown={(e) => { e.preventDefault(); setIsCreating(false); setNewWlName(''); }}
-                            className="text-gray-600 hover:text-gray-400 p-0.5"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-                ) : (
+                {tabScroll.right && (
                     <button
-                        onClick={() => setIsCreating(true)}
-                        className="flex-shrink-0 px-2.5 py-2.5 text-gray-600 hover:text-primary-600 hover:bg-primary-500/5 transition-colors"
-                        title="New watchlist"
+                        onClick={() => tabsRef.current?.scrollBy({ left: 180, behavior: 'smooth' })}
+                        className="flex-shrink-0 h-full w-8 flex items-center justify-center text-gray-500 hover:text-heading hover:bg-surface-800/50 transition-colors"
+                        aria-label="Scroll watchlists right"
                     >
-                        <Plus className="w-3.5 h-3.5" />
-                    </button>
-                )}
-
-                {/* Collapse */}
-                {onClose && (
-                    <button
-                        onClick={onClose}
-                        className="ml-auto flex-shrink-0 px-2 py-2.5 text-gray-600 hover:text-red-500 transition-colors"
-                        title="Hide watchlist"
-                    >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 19l-7-7 7-7M18 5l-6 7 6 7" />
-                        </svg>
+                        <ChevronRight className="w-4 h-4" />
                     </button>
                 )}
             </div>
-
-            {/* ── Portal: Tab dots menu ──────────────────────────────────── */}
-            {menuState && activeMenu && (
-                <TabMenu
-                    wl={activeMenu}
-                    anchorRect={menuState.rect}
-                    canDelete={watchlists.length > 1}
-                    onRename={() => handleStartRename(activeMenu)}
-                    onDelete={() => deleteWatchlist(activeMenu.id)}
-                    onClose={() => setMenuState(null)}
-                />
-            )}
 
             {/* ── CONTENT AREA ──────────────────────────────────────────── */}
             <div ref={scrollEl} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
@@ -342,7 +203,7 @@ export default function Watchlist({
                     <div>{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} variant="watchlist-row" />)}</div>
                 ) : items.length === 0 ? (
                     // Empty state with centered "Add Symbol" button
-                    <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-4">
+                    <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-4 px-4">
                         <div className="text-center">
                             <p className="text-sm font-medium mb-2">Watchlist is empty</p>
                             <p className="text-xs opacity-75">Add stocks to get started</p>
@@ -356,20 +217,8 @@ export default function Watchlist({
                         </button>
                     </div>
                 ) : (
-                    // Stock list with search bar at top
+                    // Stock list
                     <div className="flex flex-col h-full">
-                        {/* Search bar when items exist */}
-                        <div className="px-3 py-2 border-b border-edge/5 flex-shrink-0">
-                            <button
-                                onClick={() => setModalOpen(true)}
-                                className="w-full px-3 py-2 text-left text-sm text-gray-500 bg-surface-800/40 border border-edge/5 rounded-lg hover:bg-surface-800/60 hover:border-edge/20 transition-colors flex items-center gap-2"
-                            >
-                                <Search className="w-4 h-4 text-gray-500" />
-                                <span>Search or add symbol…</span>
-                            </button>
-                        </div>
-
-                        {/* Stock list */}
                         <div className="flex-1 min-h-0 overflow-y-auto">
                             {items.map((item, index) => {
                                 const price = getPriceForSymbol(prices, item.symbol);
@@ -425,7 +274,6 @@ export default function Watchlist({
                             })}
                         </div>
 
-                        {/* Footer */}
                         <div className="px-3 py-1.5 border-t border-edge/5 text-[11px] text-gray-600 flex-shrink-0">
                             {items.length} symbol{items.length !== 1 ? 's' : ''} in watchlist
                         </div>
@@ -446,10 +294,53 @@ export default function Watchlist({
                 watchlists={watchlists}
                 activeId={activeId}
                 onSelectWatchlist={setActiveWatchlist}
-                onCreateNew={() => setIsCreating(true)}
+                onCreateNew={() => setCreateModalOpen(true)}
+                onRenameWatchlist={renameWatchlist}
+                onDeleteWatchlist={deleteWatchlist}
                 isOpen={sidebarOpen}
                 onClose={() => setSidebarOpen(false)}
             />
+
+            {/* ── CREATE WATCHLIST MODAL ──────────────────────────────── */}
+            <Modal
+                isOpen={createModalOpen}
+                onClose={() => {
+                    setCreateModalOpen(false);
+                    setNewWlName('');
+                }}
+                title="Create Watchlist"
+                size="sm"
+            >
+                <div className="p-5">
+                    <p className="text-sm text-gray-500 mb-4">Enter a name for the new watchlist.</p>
+                    <input
+                        autoFocus
+                        value={newWlName}
+                        onChange={(e) => setNewWlName(e.target.value)}
+                        onKeyDown={handleCreateKeyDown}
+                        placeholder={`Watchlist ${watchlists.length + 1}`}
+                        maxLength={24}
+                        className="w-full h-10 px-3 rounded-lg bg-surface-800/70 border border-edge/10 text-sm text-heading placeholder-gray-500 focus:outline-none focus:border-primary-500/50"
+                    />
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                        <button
+                            onClick={() => {
+                                setCreateModalOpen(false);
+                                setNewWlName('');
+                            }}
+                            className="px-4 py-2 rounded-lg border border-edge/10 text-sm text-gray-500 hover:text-heading hover:bg-surface-800/50 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleCreateSubmit}
+                            className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-600/90 transition-colors"
+                        >
+                            Create
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }
