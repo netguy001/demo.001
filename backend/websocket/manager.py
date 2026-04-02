@@ -16,6 +16,7 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}  # connection_id -> websocket
         self.subscriptions: Dict[str, Set[str]] = {}  # symbol -> set of connection_ids
+        self.futures_subscriptions: Dict[str, Set[str]] = {}  # contract_symbol -> set of connection_ids
         self.user_connections: Dict[str, Set[str]] = (
             {}
         )  # user_id -> set of connection_ids
@@ -76,6 +77,11 @@ class ConnectionManager:
             self.subscriptions[symbol].discard(connection_id)
             if not self.subscriptions[symbol]:
                 del self.subscriptions[symbol]
+        # Remove from all futures subscriptions
+        for contract in list(self.futures_subscriptions.keys()):
+            self.futures_subscriptions[contract].discard(connection_id)
+            if not self.futures_subscriptions[contract]:
+                del self.futures_subscriptions[contract]
         logger.info(f"WebSocket disconnected: {connection_id}")
 
     def subscribe(self, connection_id: str, symbols: list[str]):
@@ -90,6 +96,17 @@ class ConnectionManager:
             formatted = market_data._format_symbol(symbol)
             if formatted in self.subscriptions:
                 self.subscriptions[formatted].discard(connection_id)
+
+    def subscribe_futures(self, connection_id: str, contract_symbol: str):
+        """Subscribe to a futures contract for real-time quotes."""
+        if contract_symbol not in self.futures_subscriptions:
+            self.futures_subscriptions[contract_symbol] = set()
+        self.futures_subscriptions[contract_symbol].add(connection_id)
+
+    def unsubscribe_futures(self, connection_id: str, contract_symbol: str):
+        """Unsubscribe from a futures contract."""
+        if contract_symbol in self.futures_subscriptions:
+            self.futures_subscriptions[contract_symbol].discard(connection_id)
 
     async def send_personal(self, connection_id: str, data: dict):
         ws = self.active_connections.get(connection_id)
@@ -123,6 +140,25 @@ class ConnectionManager:
             "channel": "prices",
             "symbol": symbol,
             **price_data,
+        }
+        for conn_id in subscribers:
+            ws = self.active_connections.get(conn_id)
+            if ws:
+                try:
+                    await ws.send_json(msg)
+                except Exception:
+                    dead.append(conn_id)
+        for d in dead:
+            self.disconnect(d)
+
+    async def broadcast_futures_quote(self, contract_symbol: str, quote_data: dict):
+        """Broadcast futures quote to all subscribers of a contract."""
+        subscribers = self.futures_subscriptions.get(contract_symbol, set())
+        dead = []
+        msg = {
+            "type": "futures_quote",
+            "contract_symbol": contract_symbol,
+            "data": quote_data,
         }
         for conn_id in subscribers:
             ws = self.active_connections.get(conn_id)
@@ -210,6 +246,28 @@ class ConnectionManager:
                 },
             )
 
+    async def on_futures_quote_event(self, event):
+        """Handle FUTURES_QUOTE events from market data service.
+        Broadcasts real-time quotes to all subscribers of the contract.
+        """
+        contract_symbol = event.data.get("contract_symbol")
+        quote = event.data.get("quote")
+        if contract_symbol and quote:
+            await self.broadcast_futures_quote(contract_symbol, quote)
+
+    async def on_futures_order_event(self, event):
+        """Handle FUTURES_ORDER_* events — send to the specific user."""
+        user_id = event.user_id
+        if user_id:
+            await self.send_to_user(
+                user_id,
+                {
+                    "type": event.type.value,
+                    "channel": "futures_orders",
+                    "data": event.data,
+                },
+            )
+
     # ── Message Handling ───────────────────────────────────────────
 
     async def handle_message(self, connection_id: str, message: str):
@@ -239,6 +297,28 @@ class ConnectionManager:
                         "symbols": symbols,
                     },
                 )
+            elif action == "subscribe_futures":
+                contract = data.get("contract")
+                if contract:
+                    self.subscribe_futures(connection_id, contract)
+                    await self.send_personal(
+                        connection_id,
+                        {
+                            "type": "subscribed_futures",
+                            "contract": contract,
+                        },
+                    )
+            elif action == "unsubscribe_futures":
+                contract = data.get("contract")
+                if contract:
+                    self.unsubscribe_futures(connection_id, contract)
+                    await self.send_personal(
+                        connection_id,
+                        {
+                            "type": "unsubscribed_futures",
+                            "contract": contract,
+                        },
+                    )
             elif action == "ping":
                 await self.send_personal(
                     connection_id,

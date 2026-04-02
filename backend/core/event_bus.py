@@ -36,9 +36,22 @@ class EventType(Enum):
     # Market data
     PRICE_UPDATED = "price_updated"
     MARKET_STATE_CHANGE = "market_state_change"
+    FUTURES_QUOTE = "futures_quote"
 
-    # Orders
+    # Orders (stocks)
     ORDER_PLACED = "order_placed"
+    ORDER_FILLED = "order_filled"
+    ORDER_PARTIALLY_FILLED = "order_partially_filled"
+    ORDER_CANCELLED = "order_cancelled"
+    ORDER_REJECTED = "order_rejected"
+    ORDER_EXPIRED = "order_expired"
+
+    # Orders (futures — simulated, local DB only)
+    FUTURES_ORDER_PLACED = "futures_order_placed"
+    FUTURES_ORDER_FILLED = "futures_order_filled"
+    FUTURES_ORDER_CANCELLED = "futures_order_cancelled"
+    FUTURES_ORDER_REJECTED = "futures_order_rejected"
+    FUTURES_ORDER_EXPIRED = "futures_order_expired"
     ORDER_FILLED = "order_filled"
     ORDER_PARTIALLY_FILLED = "order_partially_filled"
     ORDER_CANCELLED = "order_cancelled"

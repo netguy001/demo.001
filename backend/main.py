@@ -15,6 +15,7 @@ from core.event_bus import event_bus, EventType, Event
 from engines.market_session import market_session
 from workers.market_worker import market_data_worker
 from workers.order_worker import order_execution_worker
+from workers.futures_order_worker import futures_order_worker
 from workers.algo_worker import algo_strategy_worker
 from workers.portfolio_worker import portfolio_recalc_worker
 from workers.squareoff_worker import auto_squareoff_worker
@@ -77,6 +78,15 @@ async def lifespan(app: FastAPI):
             f"Zebu contract load failed — on-demand SearchScrip will handle resolution: {e}"
         )
 
+    # ── Load Zebu futures contracts (NSE equities and indices) ──────────────
+    try:
+        from services.futures_service import initialize_futures
+
+        await initialize_futures()
+        logger.info("Zebu NSE futures contracts loaded")
+    except Exception as e:
+        logger.warning(f"Futures contracts load failed: {e}")
+
     # ── Restore broker sessions from DB ─────────────────────────────
     # No global provider. Sessions are per-user, created after OAuth.
     # At startup, restore any previously active sessions.
@@ -106,10 +116,15 @@ async def lifespan(app: FastAPI):
 
     # Wire WebSocket manager as event listener for real-time updates
     event_bus.subscribe(EventType.PRICE_UPDATED, manager.on_price_event)
+    event_bus.subscribe(EventType.FUTURES_QUOTE, manager.on_futures_quote_event)
     event_bus.subscribe(EventType.ORDER_PLACED, manager.on_order_event)
     event_bus.subscribe(EventType.ORDER_FILLED, manager.on_order_event)
     event_bus.subscribe(EventType.ORDER_CANCELLED, manager.on_order_event)
     event_bus.subscribe(EventType.ORDER_EXPIRED, manager.on_order_event)
+    event_bus.subscribe(EventType.FUTURES_ORDER_PLACED, manager.on_futures_order_event)
+    event_bus.subscribe(EventType.FUTURES_ORDER_FILLED, manager.on_futures_order_event)
+    event_bus.subscribe(EventType.FUTURES_ORDER_CANCELLED, manager.on_futures_order_event)
+    event_bus.subscribe(EventType.FUTURES_ORDER_EXPIRED, manager.on_futures_order_event)
     event_bus.subscribe(EventType.PORTFOLIO_UPDATED, manager.on_portfolio_event)
     event_bus.subscribe(EventType.ALGO_TRADE, manager.on_algo_event)
     event_bus.subscribe(EventType.ALGO_SIGNAL, manager.on_algo_event)
@@ -122,6 +137,7 @@ async def lifespan(app: FastAPI):
         [
             asyncio.create_task(market_data_worker.run()),
             asyncio.create_task(order_execution_worker.run()),
+            asyncio.create_task(futures_order_worker.run()),
             asyncio.create_task(algo_strategy_worker.run()),
             asyncio.create_task(auto_squareoff_worker.run()),
             asyncio.create_task(access_expiry_worker.run()),
@@ -215,6 +231,7 @@ from routes.user import router as user_router
 from routes.zeroloss import router as zeroloss_router
 from routes.broker import router as broker_router
 from routes.admin import router as admin_router
+from routes.futures import router as futures_router
 
 app.include_router(auth_router)
 app.include_router(market_router)
@@ -226,6 +243,7 @@ app.include_router(user_router)
 app.include_router(zeroloss_router)
 app.include_router(broker_router)
 app.include_router(admin_router)
+app.include_router(futures_router)
 
 # ── Serve uploaded files (avatars etc.) ───────────────────────────────────────
 os.makedirs("uploads/avatars", exist_ok=True)
