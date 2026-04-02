@@ -62,15 +62,12 @@ class FuturesOrder(Base):
     filled_price = Column(Numeric(precision=14, scale=2), nullable=True)
 
     # Timestamps
-    created_at = Column(
-        DateTime(timezone=True), default=_utcnow, nullable=False, server_default=text("now()")
-    )
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
-        server_default=text("now()"),
     )
     executed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -115,15 +112,12 @@ class FuturesPosition(Base):
     realized_pnl = Column(Numeric(precision=14, scale=2), default=0, nullable=False)
 
     # Timestamps
-    created_at = Column(
-        DateTime(timezone=True), default=_utcnow, nullable=False, server_default=text("now()")
-    )
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         default=_utcnow,
         onupdate=_utcnow,
         nullable=False,
-        server_default=text("now()"),
     )
 
     __table_args__ = (
