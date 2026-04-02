@@ -277,9 +277,9 @@ export default function Sidebar({ collapsed, onToggle }) {
                     </p>
                     <button
                       type="button"
-                      onClick={() => navigate('/settings?tab=security')}
+                      onClick={() => navigate('/settings?tab=profile')}
                       className="text-[11px] text-gray-500 truncate leading-tight mt-0.5 hover:text-primary-600 transition-colors"
-                      title="Open security settings"
+                      title="Open profile settings"
                     >
                       {user.email}
                     </button>

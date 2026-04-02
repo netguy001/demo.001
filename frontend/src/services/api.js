@@ -17,7 +17,11 @@ export const isRateLimited = () => Date.now() < _rateLimitedUntil;
 api.interceptors.request.use(async (config) => {
     // If we're in a 429 cooldown, reject immediately for polling/market requests
     // to prevent flooding the server with requests that will all fail
-    if (isRateLimited() && config.url?.includes('/market/')) {
+    if (
+        isRateLimited() &&
+        config.url?.includes('/market/') &&
+        !config.url?.includes('/market/search')
+    ) {
         return Promise.reject(new axios.Cancel('Rate limited — backing off'));
     }
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
@@ -10,36 +10,22 @@ import { useAuthStore } from './stores/useAuthStore';
 
 // ── Eagerly loaded (prevents flash on refresh) ───────────────────────────────
 import LoginPage from './pages/LoginPage';
-// ── Lazy-loaded pages ─────────────────────────────────────────────────────────
-// RegisterPage removed — LoginPage now has both Login & Register tabs
-const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
-const MarketPage = lazy(() => import('./pages/MarketPage'));
-const OrdersPage = lazy(() => import('./pages/OrdersPage'));
-const FuturesPage = lazy(() => import('./pages/FuturesPage'));
-const CommoditiesPage = lazy(() => import('./pages/CommoditiesPage'));
-const AlgoTradingPage = lazy(() => import('./pages/AlgoTradingPage'));
-const ZeroLossPage = lazy(() => import('./pages/ZeroLossPage'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage'));
-
-// ── Lazy-loaded workspaces (new architecture) ─────────────────────────────────
-const DashboardWorkspace = lazy(() => import('./workspaces/DashboardWorkspace'));
-const TradingWorkspace = lazy(() => import('./workspaces/TradingWorkspace'));
-const TradingModeSelectPage = lazy(() => import('./pages/TradingModeSelectPage'));
-const BrokerSelectPage = lazy(() => import('./pages/BrokerSelectPage'));
-const BrokerCallbackPage = lazy(() => import('./pages/BrokerCallbackPage'));
-const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'));
-const AccountStatusPage = lazy(() => import('./pages/AccountStatusPage'));
-const AdminAccessPage = lazy(() => import('./pages/AdminAccessPage'));
-const AdminPanelPage = lazy(() => import('./pages/AdminPanelPage'));
-
-/** Full-screen spinner shown during lazy chunk loading */
-function PageSkeleton() {
-    return (
-        <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base, #0f0f1e)' }}>
-            <div className="w-10 h-10 border-2 rounded-full animate-spin" style={{ borderColor: 'rgba(6,182,212,0.3)', borderTopColor: '#06b6d4' }} />
-        </div>
-    );
-}
+import PortfolioPage from './pages/PortfolioPage';
+import MarketPage from './pages/MarketPage';
+import OrdersPage from './pages/OrdersPage';
+import FuturesPage from './pages/FuturesPage';
+import CommoditiesPage from './pages/CommoditiesPage';
+import AlgoTradingPage from './pages/AlgoTradingPage';
+import ZeroLossPage from './pages/ZeroLossPage';
+import SettingsPage from './pages/SettingsPage';
+import DashboardWorkspace from './workspaces/DashboardWorkspace';
+import TradingWorkspace from './workspaces/TradingWorkspace';
+import BrokerSelectPage from './pages/BrokerSelectPage';
+import BrokerCallbackPage from './pages/BrokerCallbackPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
+import AccountStatusPage from './pages/AccountStatusPage';
+import AdminAccessPage from './pages/AdminAccessPage';
+import AdminPanelPage from './pages/AdminPanelPage';
 
 export default function App() {
     useEffect(() => {
@@ -51,8 +37,7 @@ export default function App() {
         <ThemeProvider>
             <BrowserRouter>
                 <ErrorBoundary fallback="Something went wrong while loading this page.">
-                    <Suspense fallback={<PageSkeleton />}>
-                        <Routes>
+                    <Routes>
                         {/* ── Public ── */}
                         <Route path="/" element={<LoginPage />} />
                         <Route path="/login" element={<LoginPage />} />
@@ -97,8 +82,7 @@ export default function App() {
                         </Route>
 
                         <Route path="*" element={<Navigate to="/" replace />} />
-                        </Routes>
-                    </Suspense>
+                    </Routes>
                 </ErrorBoundary>
             </BrowserRouter>
 
