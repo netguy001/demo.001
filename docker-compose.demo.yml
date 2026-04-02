@@ -45,11 +45,11 @@ services:
       - FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
       - ADMIN_EMAIL_ALLOWLIST=${ADMIN_EMAIL_ALLOWLIST:-["meganath1025@gmail.com"]}
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" ]
+      test: ["CMD", "curl", "-f", "-s", "http://localhost:8000/api/health"]
       interval: 10s
       timeout: 8s
-      retries: 10
-      start_period: 60s
+      retries: 15
+      start_period: 120s
     depends_on:
       demo-redis:
         condition: service_started
