@@ -142,18 +142,19 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
           command_timeout: 12m
-          envs: BACKEND_IMAGE,FRONTEND_IMAGE,GH_TOKEN,GH_ACTOR
           script: |
             set -eo pipefail
             DEPLOY_DIR="/opt/alphasync-demo"
             DOMAIN="demo.alphasync.app"
+            BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}"
+            FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}"
 
             echo "=== Preparing deploy directory ==="
             mkdir -p "${DEPLOY_DIR}"
             cd "${DEPLOY_DIR}"
 
             echo "=== Logging in to GHCR ==="
-            echo "${GH_TOKEN}" | docker login ghcr.io -u "${GH_ACTOR}" --password-stdin
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
             echo "=== Pulling prebuilt images (only changed layers transferred) ==="
             docker pull "${BACKEND_IMAGE}:latest"
@@ -185,17 +186,22 @@ jobs:
               fi
               STATE=$(docker inspect --format='{{.State.Status}}' alphasync-demo-backend 2>/dev/null || echo "unknown")
               if [ "${STATE}" = "exited" ] || [ "${STATE}" = "dead" ]; then
-                echo "ERROR: Backend container crashed. Last 80 log lines:"
-                docker logs alphasync-demo-backend --tail 80
+                echo "ERROR: Backend container crashed. Last 100 log lines:"
+                docker logs alphasync-demo-backend --tail 100 2>&1
                 exit 1
               fi
-              echo "  waiting... ($((i * 3))s elapsed, status: ${STATUS})"
+              if [ "${STATUS}" = "unhealthy" ]; then
+                echo "ERROR: Backend marked unhealthy. Last 100 log lines:"
+                docker logs alphasync-demo-backend --tail 100 2>&1
+                exit 1
+              fi
+              echo "  waiting... ($((i * 3))s elapsed, status=${STATUS} state=${STATE})"
               sleep 3
             done
 
             if [ "${HEALTHY}" -eq 0 ]; then
-              echo "ERROR: Backend did not become healthy in 180s. Last 80 log lines:"
-              docker logs alphasync-demo-backend --tail 80
+              echo "ERROR: Backend did not become healthy in 180s. Last 100 log lines:"
+              docker logs alphasync-demo-backend --tail 100 2>&1
               exit 1
             fi
 
@@ -228,8 +234,3 @@ jobs:
             docker image prune -f &>/dev/null &
 
             echo "Deploy complete! https://${DOMAIN}"
-        env:
-          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE }}
-          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_ACTOR: ${{ github.actor }}
