@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  BACKEND_IMAGE: alphasync-demo-backend:latest
+  FRONTEND_IMAGE: alphasync-demo-frontend:latest
+
 jobs:
   deploy:
     name: Deploy to Contabo
@@ -15,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Build frontend on CI runner (fast CPU, npm cache) ───────────
+      # ── Build frontend assets and Docker images on CI runner ────────
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -36,6 +43,29 @@ jobs:
           npm ci
           npm run build
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.demo
+          load: true
+          tags: ${{ env.BACKEND_IMAGE }}
+          cache-from: type=gha,scope=alphasync-demo-backend
+          cache-to: type=gha,mode=max,scope=alphasync-demo-backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile.demo.prebuilt
+          load: true
+          tags: ${{ env.FRONTEND_IMAGE }}
+          cache-from: type=gha,scope=alphasync-demo-frontend
+          cache-to: type=gha,mode=max,scope=alphasync-demo-frontend
+
       # ── Write Firebase credentials to a local file ─────────────────
       # Upload via SCP so the SSH script never needs to handle the raw JSON
       # (avoids newline/quoting issues when passing JSON through SSH envs).
@@ -50,27 +80,19 @@ jobs:
         env:
           FIREBASE_CREDS: ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
 
-      # ── Package backend + pre-built frontend ────────────────────────
-      - name: Create archive
+      # ── Package prebuilt images and deploy assets ───────────────────
+      - name: Create deployment payloads
         run: |
-          tar czf alphasync-demo.tar.gz \
-            --exclude='node_modules' \
-            --exclude='.git' \
-            --exclude='__pycache__' \
-            --exclude='*.pyc' \
-            --exclude='.env' \
-            --exclude='*.db' \
-            --exclude='uploads/avatars/*' \
-            backend \
-            frontend/dist \
-            frontend/nginx.demo.conf \
-            frontend/Dockerfile.demo.prebuilt \
-            frontend/.dockerignore \
-            deploy/nginx/demo.alphasync.app.conf \
-            docker-compose.demo.yml
-          ls -lh alphasync-demo.tar.gz
+          tar czf deploy-assets.tar.gz \
+            docker-compose.demo.yml \
+            deploy/nginx/demo.alphasync.app.conf
+          docker save "${BACKEND_IMAGE}" "${FRONTEND_IMAGE}" | gzip > alphasync-demo-images.tar.gz
+          ls -lh alphasync-demo-images.tar.gz deploy-assets.tar.gz
+        env:
+          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE }}
+          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE }}
 
-      # ── Upload archive + credentials to server ─────────────────────
+      # ── Upload images, assets, and credentials to server ────────────
       - name: Upload to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -78,7 +100,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
-          source: "alphasync-demo.tar.gz,firebase-credentials.json"
+          source: "alphasync-demo-images.tar.gz,deploy-assets.tar.gz,firebase-credentials.json"
           target: "/opt/alphasync-demo"
 
       # ── Deploy on server ────────────────────────────────────────────
@@ -102,24 +124,23 @@ jobs:
             mkdir -p "${DEPLOY_DIR}"
             cd "${DEPLOY_DIR}"
 
-            echo "=== Extracting archive ==="
-            tar xzf alphasync-demo.tar.gz
-            rm -f alphasync-demo.tar.gz
+            echo "=== Loading prebuilt images ==="
+            gunzip -c alphasync-demo-images.tar.gz | docker load
+            rm -f alphasync-demo-images.tar.gz
+
+            echo "=== Extracting deploy assets ==="
+            tar xzf deploy-assets.tar.gz
+            rm -f deploy-assets.tar.gz
 
             echo "=== Verifying uploaded files ==="
-            ls -la frontend/dist/ | head -5 || echo "WARNING: frontend/dist missing"
+            ls -la docker-compose.demo.yml deploy/nginx/demo.alphasync.app.conf || true
             test -f firebase-credentials.json && echo "Firebase credentials present" || echo "WARNING: firebase-credentials.json missing"
-
-            echo "=== Building images (frontend=COPY only, backend uses pip cache) ==="
-            DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 \
-              docker compose -p alphasync-demo -f docker-compose.demo.yml \
-              build --parallel
 
             echo "=== Stopping old containers ==="
             docker compose -p alphasync-demo -f docker-compose.demo.yml down --remove-orphans 2>/dev/null || true
 
             echo "=== Starting containers ==="
-            docker compose -p alphasync-demo -f docker-compose.demo.yml up -d
+            docker compose -p alphasync-demo -f docker-compose.demo.yml up -d --no-build
 
             echo "=== Waiting for backend health (max 180s) ==="
             HEALTHY=0

@@ -13,6 +13,7 @@ name: alphasync-demo
 services:
   # ── Backend API (FastAPI + SQLite) ──────────────────────────
   demo-backend:
+    image: alphasync-demo-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile.demo
@@ -70,6 +71,7 @@ services:
   # ── Frontend (React → Nginx → proxies /api to backend) ─────
   # Uses the pre-built dist/ from CI — no npm install on server.
   demo-frontend:
+    image: alphasync-demo-frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile.demo.prebuilt
