@@ -173,7 +173,7 @@ export default function Watchlist({
                                 key={wl.id}
                                 onClick={() => setActiveWatchlist(wl.id)}
                                 className={cn(
-                                    'px-4 h-full flex items-center justify-center flex-shrink-0 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                                    'px-4 h-full flex items-center justify-center flex-shrink-0 text-sm font-medium font-sans border-b-2 transition-colors whitespace-nowrap',
                                     isActive
                                         ? 'text-primary-600 border-primary-500 bg-primary-500/5'
                                         : 'text-gray-500 border-transparent hover:text-heading hover:bg-surface-800/30'

@@ -119,7 +119,7 @@ export default function WatchlistSidebar({
                                                     />
                                                 ) : (
                                                     <>
-                                                        <p className="text-sm font-medium text-heading truncate">{wl.name}</p>
+                                                        <p className="text-sm font-medium font-sans text-heading truncate">{wl.name}</p>
                                                         <p className="text-xs text-gray-500 mt-0.5">
                                                             {wl.items?.length ?? 0} symbol{(wl.items?.length ?? 0) === 1 ? '' : 's'}
                                                         </p>

@@ -51,6 +51,16 @@ DEFAULT_WATCHLIST_SEEDS = [
 DEFAULT_WATCHLIST_NAMES = {name.strip().lower() for name, _ in DEFAULT_WATCHLIST_SEEDS}
 
 
+def _default_watchlist_sort_key(name: str) -> tuple[int, str]:
+    normalized = str(name or '').strip().lower()
+    if normalized == 'watchlist 1':
+        return (0, normalized)
+    for index, (seed_name, _) in enumerate(DEFAULT_WATCHLIST_SEEDS, start=1):
+        if normalized == seed_name.strip().lower():
+            return (index, normalized)
+    return (999, normalized)
+
+
 async def _seed_missing_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID, existing_names: set[str]):
     seeded = []
     for name, symbols in DEFAULT_WATCHLIST_SEEDS:
@@ -143,14 +153,17 @@ async def get_watchlists(
             seeded = await _seed_default_watchlists(db, user_uuid)
             return {"watchlists": seeded}
 
-        # If this is still a default-only account, fill in any missing default lists
-        if existing_names.issubset(DEFAULT_WATCHLIST_NAMES.union({"my watchlist"})):
+        # Fill in any missing default lists on every load so new market indices appear
+        missing_defaults = DEFAULT_WATCHLIST_NAMES.difference(existing_names)
+        if missing_defaults:
             await _seed_missing_default_watchlists(db, user_uuid, existing_names)
             result = await db.execute(
                 text("SELECT id, name, created_at FROM watchlists WHERE user_id IN (:uid_dash, :uid_hex) ORDER BY created_at"),
                 {"uid_dash": user_id_dash, "uid_hex": user_id_hex},
             )
             watchlist_rows = result.fetchall()
+
+        watchlist_rows = sorted(watchlist_rows, key=lambda row: _default_watchlist_sort_key(row[1]))
 
         wl_list = []
         for row in watchlist_rows:
