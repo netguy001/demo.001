@@ -10,8 +10,9 @@ import {
     CheckCircle2, Menu, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useWatchlistStore } from '../../stores/useWatchlistStore';
+import { useMarketStore } from '../../store/useMarketStore';
 
-const getPriceForSymbol = (prices, symbol) => {
+const getPriceForSymbol = (primaryPrices, fallbackPrices, symbol) => {
     const raw = String(symbol || '').trim();
     if (!raw) return {};
 
@@ -19,7 +20,10 @@ const getPriceForSymbol = (prices, symbol) => {
     const withNs = upper.endsWith('.NS') || upper.endsWith('.BO') || upper.startsWith('^') ? upper : `${upper}.NS`;
     const withoutNs = upper.replace(/\.(NS|BO)$/i, '');
 
-    return prices[upper] ?? prices[withNs] ?? prices[withoutNs] ?? {};
+    const fromPrimary = primaryPrices[upper] ?? primaryPrices[withNs] ?? primaryPrices[withoutNs];
+    if (fromPrimary?.price != null) return fromPrimary;
+
+    return fallbackPrices[upper] ?? fallbackPrices[withNs] ?? fallbackPrices[withoutNs] ?? fromPrimary ?? {};
 };
 
 // ── Main component ─────────────────────────────────────────────────────────────
@@ -33,7 +37,7 @@ export default function Watchlist({
     const {
         watchlists,
         activeId,
-        prices,
+        prices: watchlistPrices,
         isLoading,
         setActiveWatchlist,
         createWatchlist,
@@ -44,6 +48,7 @@ export default function Watchlist({
         reorderItems,
         fetchPrices,
     } = useWatchlistStore();
+    const marketQuotes = useMarketStore((s) => s.symbols);
 
     const activeWatchlist = watchlists.find(w => w.id === activeId);
     const items = activeWatchlist?.items ?? [];
@@ -221,7 +226,7 @@ export default function Watchlist({
                     <div className="flex flex-col h-full">
                         <div className="flex-1 min-h-0 overflow-y-auto">
                             {items.map((item, index) => {
-                                const price = getPriceForSymbol(prices, item.symbol);
+                                const price = getPriceForSymbol(marketQuotes, watchlistPrices, item.symbol);
                                 const isDragging = dragIndex === index;
                                 const isDragOver = dragOverIndex === index && dragIndex !== index;
 

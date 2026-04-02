@@ -43,7 +43,7 @@ export function useLivePortfolio() {
 
                 Object.entries(quotes).forEach(([symbol, quote]) => {
                     if (quote) {
-                        updateQuote(symbol, quote);
+                        updateQuote(symbol, quote, 'poll');
                         applyLiveQuote(symbol, quote);
                     }
                 });

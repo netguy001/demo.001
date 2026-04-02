@@ -100,7 +100,7 @@ export function useMarketData(symbol, { pollInterval = 10_000 } = {}) {
             const res = await api.get(`/market/quote/${encodeURIComponent(symbol)}`);
             // Only update if we got a valid quote with a price
             if (res.data && res.data.price != null && !res.data.error) {
-                updateQuote(symbol, res.data);
+                updateQuote(symbol, res.data, 'poll');
                 setHasError(false);
                 failCountRef.current = 0;
             }

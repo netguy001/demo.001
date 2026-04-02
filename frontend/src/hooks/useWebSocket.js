@@ -76,11 +76,11 @@ export function useWebSocket() {
         }
 
         const key = normalizedSymbol || symbol;
-        callbacksRef.current.updateQuote(key, quoteData);
+        callbacksRef.current.updateQuote(key, quoteData, 'live');
         callbacksRef.current.applyLiveQuote(key, quoteData);
 
         if (normalizedSymbol && normalizedSymbol !== symbol) {
-            callbacksRef.current.updateQuote(symbol, quoteData);
+            callbacksRef.current.updateQuote(symbol, quoteData, 'live');
         }
 
         // Keep watchlist UI values in sync with live websocket ticks.

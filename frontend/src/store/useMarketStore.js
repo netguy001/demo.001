@@ -1,5 +1,47 @@
 import { create } from 'zustand';
 
+const LIVE_STALE_PROTECT_MS = 5_000;
+
+const toFiniteNumber = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+};
+
+const toSymbolAliases = (symbol = '') => {
+    const raw = String(symbol || '').trim().toUpperCase();
+    if (!raw) return [];
+
+    const withNs = raw.endsWith('.NS') || raw.endsWith('.BO') || raw.startsWith('^')
+        ? raw
+        : `${raw}.NS`;
+    const withoutNs = withNs.replace(/\.(NS|BO)$/i, '');
+
+    return [...new Set([raw, withNs, withoutNs])].filter(Boolean);
+};
+
+const normalizeIncomingQuote = (raw = {}, existing = {}) => {
+    const price = toFiniteNumber(raw.price ?? raw.lp ?? raw.ltp ?? raw.last_price ?? raw.lastPrice);
+    const prevClose = toFiniteNumber(raw.prev_close ?? raw.prevClose ?? raw.close ?? raw.pc ?? existing.prev_close);
+    let change = toFiniteNumber(raw.change ?? raw.net_change ?? raw.netChange);
+    let changePercent = toFiniteNumber(raw.change_percent ?? raw.changePercent ?? raw.pct_change ?? raw.pChange ?? raw.percent_change);
+
+    if (change == null && price != null && prevClose != null) {
+        change = price - prevClose;
+    }
+    if (changePercent == null && change != null && prevClose && prevClose !== 0) {
+        changePercent = (change / prevClose) * 100;
+    }
+
+    return {
+        ...existing,
+        ...raw,
+        ...(price != null ? { price } : {}),
+        ...(change != null ? { change } : {}),
+        ...(changePercent != null ? { change_percent: changePercent } : {}),
+        ...(prevClose != null ? { prev_close: prevClose } : {}),
+    };
+};
+
 /**
  * Market data store — source of truth for all live quotes and watchlist.
  *
@@ -31,19 +73,50 @@ export const useMarketStore = create((set, get) => ({
      * @param {string} symbol
      * @param {object} data
      */
-    updateQuote: (symbol, data) =>
+    updateQuote: (symbol, data, source = 'live') =>
         set((state) => {
-            const existing = state.symbols[symbol];
-            // Skip update if price hasn't changed — avoids cascading re-renders
-            if (existing && existing.price === data.price && existing.change === data.change) {
-                return state;
+            const aliases = toSymbolAliases(symbol);
+            if (aliases.length === 0) return state;
+
+            const now = Date.now();
+            let hasChanges = false;
+            const nextSymbols = { ...state.symbols };
+
+            for (const key of aliases) {
+                const existing = nextSymbols[key] || {};
+
+                // Never let slower polling overwrite fresh live ticks.
+                if (
+                    source !== 'live' &&
+                    existing._source === 'live' &&
+                    now - (existing._updatedAt || 0) < LIVE_STALE_PROTECT_MS
+                ) {
+                    continue;
+                }
+
+                const normalized = normalizeIncomingQuote(data, existing);
+                const merged = {
+                    ...normalized,
+                    _source: source,
+                    _updatedAt: now,
+                };
+
+                if (
+                    existing.price !== merged.price ||
+                    existing.change !== merged.change ||
+                    existing.change_percent !== merged.change_percent
+                ) {
+                    hasChanges = true;
+                }
+
+                nextSymbols[key] = merged;
             }
+
+            if (!hasChanges) return state;
+
             return {
-                symbols: {
-                    ...state.symbols,
-                    [symbol]: { ...(existing ?? {}), ...data },
-                },
-                lastQuoteAt: Date.now(),
+                symbols: nextSymbols,
+                lastQuoteAt: source === 'live' ? now : state.lastQuoteAt,
             };
         }),
 
@@ -90,22 +163,51 @@ export const useMarketStore = create((set, get) => ({
      * Only triggers a re-render if at least one price actually changed.
      * @param {Record<string, object>} quotesMap
      */
-    batchUpdateQuotes: (quotesMap) =>
+    batchUpdateQuotes: (quotesMap, source = 'poll') =>
         set((state) => {
             if (!quotesMap || Object.keys(quotesMap).length === 0) return state;
-            // Check if any quote actually changed before spreading
+            const now = Date.now();
+            const nextSymbols = { ...state.symbols };
             let hasChanges = false;
+
             for (const [sym, data] of Object.entries(quotesMap)) {
-                const existing = state.symbols[sym];
-                if (!existing || existing.price !== data.price || existing.change !== data.change) {
-                    hasChanges = true;
-                    break;
+                const aliases = toSymbolAliases(sym);
+                if (aliases.length === 0) continue;
+
+                for (const key of aliases) {
+                    const existing = nextSymbols[key] || {};
+
+                    if (
+                        source !== 'live' &&
+                        existing._source === 'live' &&
+                        now - (existing._updatedAt || 0) < LIVE_STALE_PROTECT_MS
+                    ) {
+                        continue;
+                    }
+
+                    const normalized = normalizeIncomingQuote(data, existing);
+                    const merged = {
+                        ...normalized,
+                        _source: source,
+                        _updatedAt: now,
+                    };
+
+                    if (
+                        existing.price !== merged.price ||
+                        existing.change !== merged.change ||
+                        existing.change_percent !== merged.change_percent
+                    ) {
+                        hasChanges = true;
+                    }
+
+                    nextSymbols[key] = merged;
                 }
             }
+
             if (!hasChanges) return state;
             return {
-                symbols: { ...state.symbols, ...quotesMap },
-                lastQuoteAt: Date.now(),
+                symbols: nextSymbols,
+                lastQuoteAt: source === 'live' ? now : state.lastQuoteAt,
             };
         }),
 }));
