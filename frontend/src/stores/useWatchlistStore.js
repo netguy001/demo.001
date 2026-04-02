@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import api, { isRateLimited } from '../services/api';
 import toast from 'react-hot-toast';
+import { isMcxSymbol } from '../utils/constants';
 
 const STORAGE_KEY = 'alphasync_watchlists';
 
@@ -40,11 +41,25 @@ const toNumberOrNull = (value) => {
 const ensureNsSuffix = (symbol = '') => {
     const base = String(symbol || '').trim();
     if (!base) return '';
-    if (base.startsWith('^') || base.endsWith('.NS') || base.endsWith('.BO')) return base.toUpperCase();
+    if (base.startsWith('^') || base.endsWith('.NS') || base.endsWith('.BO') || isMcxSymbol(base)) return base.toUpperCase();
     return `${base.toUpperCase()}.NS`;
 };
 
 const stripExchangeSuffix = (symbol = '') => String(symbol || '').replace(/\.(NS|BO)$/i, '').toUpperCase();
+
+const isLocalWatchlistId = (id = '') => String(id || '').startsWith('local_') || String(id || '').startsWith('idx_');
+
+const normalizeWatchlistSymbolKey = (symbol = '') => stripExchangeSuffix(symbol).replace(/^\^/, '');
+
+const canonicalizeWatchlistSymbol = (symbol = '', exchange = 'NSE') => {
+    const raw = String(symbol || '').trim();
+    if (!raw) return '';
+    const upper = raw.toUpperCase();
+    if (String(exchange || 'NSE').toUpperCase() === 'MCX' || upper.startsWith('^') || upper.endsWith('.NS') || upper.endsWith('.BO')) {
+        return upper;
+    }
+    return ensureNsSuffix(upper);
+};
 
 const toIndexWatchlistId = (indexKey = '') => {
     const safe = String(indexKey || '')
@@ -132,9 +147,12 @@ export const useWatchlistStore = create((set, get) => ({
             const res = await api.get('/watchlist');
             const wls = res.data.watchlists || [];
             if (wls.length > 0) {
-                set({ watchlists: wls, activeId: wls[0].id });
+                const nextActiveId = cached?.activeId && wls.some((w) => w.id === cached.activeId)
+                    ? cached.activeId
+                    : wls[0].id;
+                set({ watchlists: wls, activeId: nextActiveId });
                 // Update localStorage with server data
-                persistToStorage(wls, wls[0].id);
+                persistToStorage(wls, nextActiveId);
             } else {
                 // Create default watchlist on server
                 const created = await api.post('/watchlist', { name: 'My Watchlist' });
@@ -238,7 +256,7 @@ export const useWatchlistStore = create((set, get) => ({
                 w.id === id ? { ...w, name: trimmed } : w
             ),
         }));
-        if (String(id).startsWith('local_')) {
+        if (isLocalWatchlistId(id)) {
             const { watchlists, activeId } = get();
             persistToStorage(watchlists, activeId);
             return;
@@ -264,7 +282,7 @@ export const useWatchlistStore = create((set, get) => ({
         const remaining = watchlists.filter(w => w.id !== id);
         const newActive = activeId === id ? remaining[0].id : activeId;
         set({ watchlists: remaining, activeId: newActive });
-        if (String(id).startsWith('local_')) {
+        if (isLocalWatchlistId(id)) {
             persistToStorage(remaining, newActive);
             toast.success('Watchlist deleted');
             return;
@@ -298,8 +316,10 @@ export const useWatchlistStore = create((set, get) => ({
             toast.error('Watchlist not found');
             return;
         }
-        if (active.items.some(i => i.symbol === symbol)) {
-            toast.info(`${symbol.replace('.NS', '')} is already in watchlist`);
+        const normalizedSymbol = canonicalizeWatchlistSymbol(symbol, exchange);
+        const symbolKey = normalizeWatchlistSymbolKey(normalizedSymbol);
+        if (active.items.some(i => normalizeWatchlistSymbolKey(i.symbol) === symbolKey)) {
+            toast.info(`${normalizedSymbol.replace('.NS', '')} is already in watchlist`);
             return;
         }
 
@@ -309,7 +329,7 @@ export const useWatchlistStore = create((set, get) => ({
         set((s) => ({
             watchlists: s.watchlists.map(w =>
                 w.id === activeId
-                    ? { ...w, items: [...w.items, { id: tempId, symbol, exchange }] }
+                    ? { ...w, items: [...w.items, { id: tempId, symbol: normalizedSymbol, exchange }] }
                     : w
             ),
         }));
@@ -318,12 +338,12 @@ export const useWatchlistStore = create((set, get) => ({
         let { watchlists: updatedWatchlists, activeId: updatedActiveId } = get();
         persistToStorage(updatedWatchlists, updatedActiveId);
 
-        toast.success(`${symbol.replace('.NS', '')} added to watchlist`);
+        toast.success(`${normalizedSymbol.replace('.NS', '')} added to watchlist`);
 
         try {
             // If it's a local watchlist (id starts with 'local_'), skip server sync
-            if (!activeId.startsWith('local_')) {
-                const res = await api.post(`/watchlist/${activeId}/items`, { symbol, exchange });
+            if (!isLocalWatchlistId(activeId)) {
+                const res = await api.post(`/watchlist/${activeId}/items`, { symbol: normalizedSymbol, exchange });
                 // Swap temp record with real server record if we get a real ID back
                 if (res.data?.id) {
                     set((s) => ({
@@ -383,7 +403,7 @@ export const useWatchlistStore = create((set, get) => ({
 
         try {
             // If it's a local watchlist, skip server sync
-            if (!activeId.startsWith('local_')) {
+            if (!isLocalWatchlistId(activeId)) {
                 await api.delete(`/watchlist/${activeId}/items/${itemId}`);
             }
             toast.success('Removed from watchlist');

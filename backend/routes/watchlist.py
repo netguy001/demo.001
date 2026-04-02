@@ -24,6 +24,101 @@ class AddItemRequest(BaseModel):
     exchange: str = "NSE"
 
 
+def _canonical_watchlist_symbol(symbol: str) -> str:
+    base = (symbol or "").strip().upper()
+    if not base:
+        return ""
+    if base.startswith("^") or base.endswith(".NS") or base.endswith(".BO"):
+        return base
+    return f"{base}.NS"
+
+
+DEFAULT_WATCHLIST_SEEDS = [
+    (
+        "My Watchlist",
+        [],
+    ),
+    (
+        "NIFTY 50",
+        [
+            "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
+            "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BHARTIARTL", "BPCL",
+            "BRITANNIA", "CIPLA", "COALINDIA", "DIVISLAB", "DRREDDY",
+            "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE",
+            "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "INDUSINDBK",
+            "INFY", "ITC", "JSWSTEEL", "KOTAKBANK", "LT",
+            "M&M", "MARUTI", "NESTLEIND", "NTPC", "ONGC",
+            "POWERGRID", "RELIANCE", "SBIN", "SBILIFE", "SHREECEM",
+            "SUNPHARMA", "TATAMOTORS", "TATACONSUM", "TATASTEEL", "TCS",
+            "TECHM", "TITAN", "ULTRACEMCO", "UPL", "WIPRO",
+        ],
+    ),
+    (
+        "BANKNIFTY",
+        [
+            "HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN",
+            "INDUSINDBK", "BANDHANBNK", "FEDERALBNK", "IDFCFIRSTB", "AUBANK",
+            "PNB", "BANKBARODA",
+        ],
+    ),
+    (
+        "SENSEX",
+        [
+            "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
+            "LT", "SBIN", "ITC", "BHARTIARTL", "AXISBANK",
+            "BAJFINANCE", "KOTAKBANK", "HCLTECH", "WIPRO", "MARUTI",
+            "SUNPHARMA", "TITAN", "BAJAJFINSV", "POWERGRID", "NTPC",
+            "TATASTEEL", "ASIANPAINT", "NESTLEIND", "M&M", "ULTRACEMCO",
+            "TATAMOTORS", "DRREDDY", "ADANIPORTS", "JSWSTEEL", "TATACONSUM",
+        ],
+    ),
+]
+
+
+async def _seed_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID):
+    seeded = []
+    for name, symbols in DEFAULT_WATCHLIST_SEEDS:
+        watchlist_id = uuid.uuid4().hex
+        await db.execute(
+            text(
+                """
+                INSERT INTO watchlists (id, user_id, name)
+                VALUES (:id, :user_id, :name)
+                """
+            ),
+            {
+                "id": watchlist_id,
+                "user_id": user_uuid.hex,
+                "name": name,
+            },
+        )
+
+        items = []
+        for symbol in symbols:
+            item_id = uuid.uuid4().hex
+            canonical_symbol = _canonical_watchlist_symbol(symbol)
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO watchlist_items (id, watchlist_id, symbol, exchange)
+                    VALUES (:id, :watchlist_id, :symbol, :exchange)
+                    """
+                ),
+                {
+                    "id": item_id,
+                    "watchlist_id": watchlist_id,
+                    "symbol": canonical_symbol,
+                    "exchange": "NSE",
+                },
+            )
+            items.append({"id": item_id, "symbol": canonical_symbol, "exchange": "NSE"})
+
+        seeded.append({"id": watchlist_id, "name": name, "items": items})
+
+    await db.commit()
+    return seeded
+
+
 def _normalize_uuid(value: str, field_name: str) -> str:
     try:
         return str(uuid.UUID(str(value)))
@@ -58,6 +153,13 @@ async def get_watchlists(
             {"uid_dash": user_id_dash, "uid_hex": user_id_hex},
         )
         watchlist_rows = result.fetchall()
+
+        if not watchlist_rows or (
+            len(watchlist_rows) == 1
+            and str(watchlist_rows[0][1]).strip().lower() == "my watchlist"
+        ):
+            seeded = await _seed_default_watchlists(db, user_uuid)
+            return {"watchlists": seeded}
 
         wl_list = []
         for row in watchlist_rows:
@@ -179,6 +281,9 @@ async def add_item(
 
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol is required")
+
+    if exchange != "MCX":
+        symbol = _canonical_watchlist_symbol(symbol)
 
     try:
         wl_result = await db.execute(
