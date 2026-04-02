@@ -3,6 +3,7 @@ import { cn } from '../utils/cn';
 import { formatPrice, formatPercent, pnlColorClass, cleanSymbol } from '../utils/formatters';
 import { PanelContainer } from '.';
 import api from '../services/api';
+import { usePortfolioStore } from '../store/usePortfolioStore';
 
 /**
  * Positions Panel — shows open positions in a table.
@@ -18,8 +19,7 @@ function PositionsPanel({ holdings = [], className, onSell, onBuy, showHeader = 
             const res = await api.post('/orders/close-all');
             const data = res.data;
             alert(`${data.message}${data.errors?.length ? '\nErrors: ' + data.errors.join(', ') : ''}`);
-            // Refresh portfolio
-            window.dispatchEvent(new Event('portfolio-refresh'));
+            await usePortfolioStore.getState().refreshPortfolio();
         } catch (err) {
             alert('Failed to close positions: ' + (err.response?.data?.detail || err.message));
         } finally {

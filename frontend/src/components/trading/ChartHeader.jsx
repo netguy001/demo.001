@@ -5,6 +5,7 @@ import { formatPrice, formatPercent, pnlColorClass, cleanSymbol } from '../../ut
 import api from '../../services/api';
 import { useZeroLossStore } from '../../stores/useZeroLossStore';
 import { useNavigate } from 'react-router-dom';
+import { usePortfolioStore } from '../../store/usePortfolioStore';
 
 const ALL_PERIODS = Object.entries(CHART_PERIODS);
 const INTRADAY = ALL_PERIODS.filter(([, v]) => v.group === 'intraday');
@@ -48,7 +49,7 @@ function ChartHeader({
             const res = await api.post('/orders/close-all');
             const data = res.data;
             alert(data.message + (data.errors?.length ? '\nErrors: ' + data.errors.join(', ') : ''));
-            window.dispatchEvent(new Event('portfolio-refresh'));
+            await usePortfolioStore.getState().refreshPortfolio();
         } catch (err) {
             alert('Kill switch failed: ' + (err.response?.data?.detail || err.message));
         } finally {

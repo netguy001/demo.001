@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -92,6 +93,10 @@ def _is_admin_allowlisted(email: str) -> bool:
     return normalized in allowlist
 
 
+def _session_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 async def _upsert_user_session(
     db: AsyncSession,
     user: User,
@@ -102,7 +107,7 @@ async def _upsert_user_session(
     if not user or not token:
         return
 
-    session_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    session_key = _session_fingerprint(token)
     ip_address = request.client.host if request and request.client else None
     user_agent = request.headers.get("user-agent", "")[:500] if request else ""
     now = datetime.now(timezone.utc)
@@ -118,17 +123,35 @@ async def _upsert_user_session(
         session.ip_address = ip_address
         session.user_agent = user_agent
     else:
-        db.add(
-            UserSession(
-                user_id=user.id,
-                session_key=session_key,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                first_seen_at=now,
-                last_seen_at=now,
-                is_active=True,
-            )
+        try:
+            async with db.begin_nested():
+                db.add(
+                    UserSession(
+                        user_id=user.id,
+                        session_key=session_key,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                        first_seen_at=now,
+                        last_seen_at=now,
+                        is_active=True,
+                    )
+                )
+                await db.flush()
+            return
+        except IntegrityError:
+            # Concurrent sync requests can race on the same token fingerprint.
+            # Fall through to a read+update path instead of failing login.
+            pass
+
+        result = await db.execute(
+            select(UserSession).where(UserSession.session_key == session_key)
         )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.last_seen_at = now
+            existing.is_active = True
+            existing.ip_address = ip_address
+            existing.user_agent = user_agent
 
 
 # --- Schemas ---

@@ -14,6 +14,8 @@ import {
 } from '../config/firebase';
 import api from '../services/api';
 
+const pendingSyncRequests = new Map();
+
 const VERIFICATION_CONTINUE_PATH = '/verify-email';
 
 function getVerificationActionSettings() {
@@ -34,19 +36,33 @@ async function sendVerificationEmail(user) {
 }
 
 async function syncUserWithBackend(firebaseUser, payload = {}) {
-    const firstToken = await firebaseUser.getIdToken();
-    localStorage.setItem('alphasync_token', firstToken);
+    const key = `${firebaseUser?.uid || 'unknown'}:${JSON.stringify(payload || {})}`;
+    if (pendingSyncRequests.has(key)) {
+        return pendingSyncRequests.get(key);
+    }
 
-    try {
-        return await api.post('/auth/sync', payload);
-    } catch (err) {
-        if (err?.response?.status !== 401) {
-            throw err;
+    const requestPromise = (async () => {
+        const firstToken = await firebaseUser.getIdToken();
+        localStorage.setItem('alphasync_token', firstToken);
+
+        try {
+            return await api.post('/auth/sync', payload);
+        } catch (err) {
+            if (err?.response?.status !== 401) {
+                throw err;
+            }
+
+            const refreshedToken = await firebaseUser.getIdToken(true);
+            localStorage.setItem('alphasync_token', refreshedToken);
+            return await api.post('/auth/sync', payload);
         }
+    })();
 
-        const refreshedToken = await firebaseUser.getIdToken(true);
-        localStorage.setItem('alphasync_token', refreshedToken);
-        return await api.post('/auth/sync', payload);
+    pendingSyncRequests.set(key, requestPromise);
+    try {
+        return await requestPromise;
+    } finally {
+        pendingSyncRequests.delete(key);
     }
 }
 
@@ -164,7 +180,7 @@ export const useAuthStore = create((set, get) => ({
             const res = await syncUserWithBackend(result.user, { auth_intent: authIntent });
             localStorage.removeItem('alphasync_auth_intent');
             localStorage.setItem('alphasync_user', JSON.stringify(res.data.user));
-            set({ user: res.data.user, firebaseUser: result.user });
+            set({ user: res.data.user, firebaseUser: result.user, loading: false, initializing: false });
             return { success: true, isNew: res.data.is_new_user, user: res.data.user };
         } catch (err) {
             const detail = err.response?.data?.detail;
@@ -204,7 +220,7 @@ export const useAuthStore = create((set, get) => ({
             );
             localStorage.removeItem('alphasync_pending_username');
             localStorage.setItem('alphasync_user', JSON.stringify(res.data.user));
-            set({ user: res.data.user, firebaseUser: result.user });
+            set({ user: res.data.user, firebaseUser: result.user, loading: false, initializing: false });
             return { success: true, isNew: res.data.is_new_user, user: res.data.user };
         } catch (err) {
             if (err?.response?.status === 401) {

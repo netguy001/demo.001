@@ -6,7 +6,7 @@ import Skeleton from '../ui/Skeleton';
 import { cn } from '../../utils/cn';
 import {
     Search, Plus, X,
-    Pencil, Check, Trash2, MoreVertical, Star, ChevronRight,
+    Pencil, Check, Trash2, MoreVertical, Star, ChevronRight, TrendingUp,
 } from 'lucide-react';
 import { useWatchlistStore } from '../../stores/useWatchlistStore';
 import { useMarketIndicesStore } from '../../stores/useMarketIndicesStore';
@@ -16,22 +16,44 @@ import { getConstituents } from '../../utils/indexConstituents';
 
 // ── Known indices shown in the dedicated Indices section ──────────────────────
 const WATCHLIST_INDICES = [
-    { label: 'NIFTY 50',     nameMatch: 'NIFTY 50',    key: 'NIFTY50'       },
-    { label: 'BANK NIFTY',   nameMatch: 'NIFTY BANK',   key: 'NSEBANK'       },
-    { label: 'SENSEX',       nameMatch: 'SENSEX',       key: 'BSESN'         },
-    { label: 'NIFTY IT',     nameMatch: 'NIFTY IT',     key: 'NIFTYIT'       },
-    { label: 'NIFTY AUTO',   nameMatch: 'NIFTY AUTO',   key: 'NIFTYAUTO'     },
-    { label: 'NIFTY PHARMA', nameMatch: 'NIFTY PHARMA', key: 'NIFTYPHARMA'   },
-    { label: 'NIFTY FMCG',   nameMatch: 'NIFTY FMCG',   key: 'NIFTYFMCG'     },
-    { label: 'MIDCAP 100',   nameMatch: 'MIDCAP 100',   key: 'NIFTYMIDCAP100'},
-    { label: 'NEXT 50',      nameMatch: 'NIFTY NEXT',   key: 'NIFTYNXT50'    },
+    { label: 'NIFTY 50', nameMatch: 'NIFTY 50', key: 'NIFTY50' },
+    { label: 'BANK NIFTY', nameMatch: 'NIFTY BANK', key: 'NSEBANK' },
+    { label: 'SENSEX', nameMatch: 'SENSEX', key: 'BSESN' },
+    { label: 'NIFTY IT', nameMatch: 'NIFTY IT', key: 'NIFTYIT' },
+    { label: 'NIFTY AUTO', nameMatch: 'NIFTY AUTO', key: 'NIFTYAUTO' },
+    { label: 'NIFTY PHARMA', nameMatch: 'NIFTY PHARMA', key: 'NIFTYPHARMA' },
+    { label: 'NIFTY FMCG', nameMatch: 'NIFTY FMCG', key: 'NIFTYFMCG' },
+    { label: 'MIDCAP 100', nameMatch: 'MIDCAP 100', key: 'NIFTYMIDCAP100' },
+    { label: 'NEXT 50', nameMatch: 'NIFTY NEXT', key: 'NIFTYNXT50' },
 ];
+
+/**
+ * If a search result matches a known index (symbol starts with ^ or name matches),
+ * return the matching WATCHLIST_INDICES entry; otherwise null.
+ */
+function findIndexEntry(symbol, name) {
+    if (!symbol && !name) return null;
+    const sym = (symbol || '').toUpperCase();
+    const nm = (name || '').toUpperCase();
+
+    // Symbol starts with ^ → definitely an index
+    if (sym.startsWith('^')) {
+        // Try to match by nameMatch
+        const byName = WATCHLIST_INDICES.find(e => nm.includes(e.nameMatch.toUpperCase()));
+        if (byName) return byName;
+        // Fallback: return a synthetic entry so we still open a watchlist if possible
+        return null;
+    }
+
+    // Try matching by name
+    return WATCHLIST_INDICES.find(e => nm.includes(e.nameMatch.toUpperCase())) ?? null;
+}
 
 /**
  * Collapsible Indices section shown at the top of the watchlist.
  * Each index row expands to show its constituent stocks with live prices.
  */
-function IndicesSection({ onSelectSymbol }) {
+function IndicesSection({ onSelectSymbol, onOpenIndexWatchlist }) {
     const navigate = useNavigate();
     const indices = useMarketIndicesStore((s) => s.indices);
     const tickerItems = useMarketIndicesStore((s) => s.tickerItems);
@@ -75,6 +97,12 @@ function IndicesSection({ onSelectSymbol }) {
         setLoadingKey(null);
     };
 
+    const openDedicatedWatchlist = (entry) => {
+        const stocks = getConstituents(entry.key) || [];
+        if (stocks.length === 0) return;
+        onOpenIndexWatchlist?.(entry.key, entry.label, stocks);
+    };
+
     return (
         <div className="border-b border-edge/5 flex-shrink-0">
             {/* Section header */}
@@ -108,17 +136,30 @@ function IndicesSection({ onSelectSymbol }) {
                                         <ChevronRight className={cn('w-2.5 h-2.5 flex-shrink-0 text-gray-500 transition-transform duration-150', isExpanded && 'rotate-90')} />
                                         <span className="text-[12px] font-semibold text-heading truncate">{entry.label}</span>
                                     </div>
-                                    <div className="flex flex-col items-end ml-2 flex-shrink-0">
-                                        <span className="text-[12px] font-price tabular-nums text-heading">
-                                            {data?.price != null
-                                                ? Number(data.price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                                : '—'}
-                                        </span>
-                                        <span className={cn('text-[10px] font-price tabular-nums', chgPos ? 'text-bull' : 'text-bear')}>
-                                            {chgPct != null
-                                                ? `${chgPos ? '+' : ''}${Number(chgPct).toFixed(2)}%`
-                                                : '—'}
-                                        </span>
+                                    <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                openDedicatedWatchlist(entry);
+                                            }}
+                                            className="px-2 py-0.5 text-[9px] font-semibold rounded-md border border-primary-500/30 text-primary-600 hover:bg-primary-500/10 transition-colors"
+                                            title={`Open ${entry.label} as separate watchlist`}
+                                        >
+                                            Open WL
+                                        </button>
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-[12px] font-price tabular-nums text-heading">
+                                                {data?.price != null
+                                                    ? Number(data.price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                                    : '—'}
+                                            </span>
+                                            <span className={cn('text-[10px] font-price tabular-nums', chgPos ? 'text-bull' : 'text-bear')}>
+                                                {chgPct != null
+                                                    ? `${chgPos ? '+' : ''}${Number(chgPct).toFixed(2)}%`
+                                                    : '—'}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -250,6 +291,7 @@ export default function Watchlist({
         removeItem,
         reorderItems,
         fetchPrices,
+        openIndexWatchlist,
     } = useWatchlistStore();
 
     const activeWatchlist = watchlists.find(w => w.id === activeId);
@@ -259,6 +301,9 @@ export default function Watchlist({
     const [search, setSearch] = useState('');
     const [addSearch, setAddSearch] = useState('');
     const [addResults, setAddResults] = useState([]);
+    const [popularSuggestions, setPopularSuggestions] = useState([]);
+    const [addSearchFocused, setAddSearchFocused] = useState(false);
+    const addSearchRef = useRef(null);
 
     // Rename state
     const [renamingId, setRenamingId] = useState(null);
@@ -306,6 +351,20 @@ export default function Watchlist({
         }, 300);
         return () => clearTimeout(t);
     }, [addSearch]);
+
+    useEffect(() => {
+        let active = true;
+        (async () => {
+            try {
+                const res = await api.get('/market/popular');
+                if (!active) return;
+                setPopularSuggestions((res.data?.stocks || []).slice(0, 10));
+            } catch {
+                if (active) setPopularSuggestions([]);
+            }
+        })();
+        return () => { active = false; };
+    }, []);
 
     // ── Fetch prices when item count changes (new symbol added/removed) ────────
     const itemCountRef = useRef(items.length);
@@ -521,19 +580,64 @@ export default function Watchlist({
             {/* ── ADD SYMBOL SEARCH (inline) ───────────────────────────── */}
             <div className="px-3 py-2 border-b border-edge/5 flex-shrink-0">
                 <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" />
                     <input
+                        ref={addSearchRef}
                         value={addSearch}
                         onChange={(e) => setAddSearch(e.target.value)}
-                        placeholder="Search symbol…"
-                        className="w-full pl-7 pr-3 py-1.5 text-xs bg-surface-900/60 border border-edge/10 rounded-lg text-heading placeholder-gray-500 focus:outline-none focus:border-primary-500/30"
+                        onFocus={() => setAddSearchFocused(true)}
+                        onBlur={() => setTimeout(() => setAddSearchFocused(false), 150)}
+                        placeholder="Add symbol… (e.g. RELIANCE)"
+                        className="w-full pl-7 pr-7 py-1.5 text-xs bg-surface-900/60 border border-edge/10 rounded-lg text-heading placeholder-gray-500 focus:outline-none focus:border-primary-500/30 transition-colors"
                     />
+                    {addSearch && (
+                        <button
+                            onMouseDown={(e) => { e.preventDefault(); setAddSearch(''); setAddResults([]); addSearchRef.current?.focus(); }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400"
+                        >
+                            <X className="w-3 h-3" />
+                        </button>
+                    )}
                 </div>
 
                 {addSearch.length > 0 && (
                     <div className="mt-2 max-h-48 overflow-y-auto bg-surface-800/40 border border-edge/10 rounded-lg">
                         {addResults.map((s) => {
-                            const alreadyAdded = items.some(i => i.symbol === s.symbol);
+                            const indexEntry = findIndexEntry(s.symbol, s.name);
+                            const alreadyAdded = !indexEntry && items.some(i => i.symbol === s.symbol);
+                            const indexStocks = indexEntry ? (getConstituents(indexEntry.key) ?? []) : [];
+
+                            if (indexEntry && indexStocks.length > 0) {
+                                // Index result → offer to open as separate watchlist
+                                return (
+                                    <div
+                                        key={s.symbol}
+                                        className="w-full flex items-center justify-between px-3 py-2 border-b border-edge/[0.03] last:border-0"
+                                    >
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-xs font-semibold text-heading">{cleanSymbol(s.symbol)}</span>
+                                                <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-medium leading-4 tracking-wide bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                    INDEX
+                                                </span>
+                                            </div>
+                                            <div className="text-[11px] text-gray-500 truncate max-w-[160px]">{s.name} · {indexStocks.length} stocks</div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                openIndexWatchlist(indexEntry.key, indexEntry.label, indexStocks);
+                                                setAddSearch('');
+                                                setAddResults([]);
+                                            }}
+                                            className="flex-shrink-0 ml-2 px-2 py-1 text-[10px] font-semibold rounded-md border border-primary-500/30 text-primary-600 hover:bg-primary-500/10 transition-colors whitespace-nowrap"
+                                        >
+                                            Open WL
+                                        </button>
+                                    </div>
+                                );
+                            }
+
                             return (
                                 <button
                                     key={s.symbol}
@@ -547,11 +651,7 @@ export default function Watchlist({
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-1.5">
                                             <span className="text-xs font-semibold text-heading">{cleanSymbol(s.symbol)}</span>
-                                            <span className={cn(
-                                                'inline-flex items-center px-1 py-0 rounded text-[9px] font-medium leading-4 tracking-wide',
-                                                'bg-gray-200 text-gray-600',
-                                                '',
-                                            )}>
+                                            <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-medium leading-4 tracking-wide bg-gray-200 text-gray-600">
                                                 {s.exchange || 'NSE'}
                                             </span>
                                         </div>
@@ -568,12 +668,50 @@ export default function Watchlist({
                         )}
                     </div>
                 )}
+
+                {addSearch.length === 0 && (addSearchFocused || popularSuggestions.length > 0) && (
+                    <div className="mt-2 bg-surface-800/30 border border-edge/10 rounded-lg p-2">
+                        <div className="flex items-center gap-1 px-1 pb-1.5">
+                            <TrendingUp className="w-3 h-3 text-gray-500" />
+                            <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Popular</span>
+                        </div>
+                        {popularSuggestions.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                                {popularSuggestions.map((s) => {
+                                    const alreadyAdded = items.some((i) => i.symbol === s.symbol);
+                                    return (
+                                        <button
+                                            key={s.symbol}
+                                            type="button"
+                                            onClick={() => !alreadyAdded && handleAdd(s.symbol, s.exchange || 'NSE')}
+                                            disabled={alreadyAdded}
+                                            className={cn(
+                                                'px-2 py-1 rounded-md text-[11px] border transition-colors',
+                                                alreadyAdded
+                                                    ? 'border-sky-500/30 text-sky-500 bg-sky-500/10 cursor-not-allowed'
+                                                    : 'border-edge/20 text-heading hover:border-primary-500/30 hover:bg-primary-500/10 cursor-pointer'
+                                            )}
+                                            title={s.name || s.symbol}
+                                        >
+                                            {cleanSymbol(s.symbol)}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-[11px] text-gray-600 px-1 py-1">Type to search for symbols</div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* ── STOCK LIST (drag-and-drop sortable) ─────────────────── */}
             <div ref={scrollEl} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
                 {/* Indices section — always shown at top */}
-                <IndicesSection onSelectSymbol={onSelectSymbol} />
+                <IndicesSection
+                    onSelectSymbol={onSelectSymbol}
+                    onOpenIndexWatchlist={openIndexWatchlist}
+                />
 
                 {isLoading ? (
                     <div>{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} variant="watchlist-row" />)}</div>

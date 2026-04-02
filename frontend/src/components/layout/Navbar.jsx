@@ -33,11 +33,11 @@ import {
 
 const NOTIF_ICONS = {
     order_complete: { Icon: Check, color: 'text-bull', bg: 'bg-bull/15' },
-    order_pending:  { Icon: Clock, color: 'text-primary-600', bg: 'bg-primary-500/15' },
+    order_pending: { Icon: Clock, color: 'text-primary-600', bg: 'bg-primary-500/15' },
     order_rejected: { Icon: X, color: 'text-bear', bg: 'bg-bear/15' },
-    market_open:    { Icon: TrendingUp, color: 'text-bull', bg: 'bg-bull/15' },
-    market_close:   { Icon: Info, color: 'text-primary-600', bg: 'bg-primary-500/15' },
-    info:    { Icon: Info, color: 'text-gray-500', bg: 'bg-surface-800/60' },
+    market_open: { Icon: TrendingUp, color: 'text-bull', bg: 'bg-bull/15' },
+    market_close: { Icon: Info, color: 'text-primary-600', bg: 'bg-primary-500/15' },
+    info: { Icon: Info, color: 'text-gray-500', bg: 'bg-surface-800/60' },
     warning: { Icon: AlertTriangle, color: 'text-primary-600', bg: 'bg-primary-500/15' },
 };
 
@@ -135,7 +135,9 @@ export default function Navbar({ onMenuToggle }) {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
+    const [popularResults, setPopularResults] = useState([]);
     const [showResults, setShowResults] = useState(false);
+    const [searchFocused, setSearchFocused] = useState(false);
     const [marketStatus, setMarketStatus] = useState({ state: 'closed', is_trading: false });
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifications, setNotifications] = useState([]);
@@ -255,7 +257,25 @@ export default function Navbar({ onMenuToggle }) {
 
     // ── Symbol search (debounced 200ms) ───────────────────────────────────────
     useEffect(() => {
-        if (searchQuery.trim().length < 1) { setSearchResults([]); setShowResults(false); return; }
+        let active = true;
+        (async () => {
+            try {
+                const res = await api.get('/market/popular');
+                if (!active) return;
+                setPopularResults((res.data?.stocks || []).slice(0, 10));
+            } catch {
+                if (active) setPopularResults([]);
+            }
+        })();
+        return () => { active = false; };
+    }, []);
+
+    useEffect(() => {
+        if (searchQuery.trim().length < 1) {
+            setSearchResults([]);
+            setShowResults(searchFocused && popularResults.length > 0);
+            return;
+        }
         const t = setTimeout(async () => {
             try {
                 const res = await api.get(`/market/search?q=${encodeURIComponent(searchQuery.trim())}`);
@@ -268,7 +288,7 @@ export default function Navbar({ onMenuToggle }) {
             }
         }, 200);
         return () => clearTimeout(t);
-    }, [searchQuery]);
+    }, [searchQuery, searchFocused, popularResults.length]);
 
     // ── Reset search on route change ──────────────────────────────────────────
     useEffect(() => {
@@ -281,6 +301,7 @@ export default function Navbar({ onMenuToggle }) {
     useEffect(() => {
         const handler = (e) => {
             if (searchRef.current && !searchRef.current.contains(e.target)) {
+                setSearchFocused(false);
                 setShowResults(false);
                 setSearchQuery('');
                 setSearchResults([]);
@@ -292,9 +313,13 @@ export default function Navbar({ onMenuToggle }) {
 
     const handleSelectStock = useCallback((symbol) => {
         setSearchQuery('');
+        setSearchFocused(false);
         setShowResults(false);
         navigate(`/terminal?symbol=${encodeURIComponent(symbol)}`);
     }, [navigate]);
+
+    const dropdownResults = searchQuery.trim().length > 0 ? searchResults : popularResults;
+    const showingRecommendations = searchQuery.trim().length === 0;
 
     // ── Star toggle ───────────────────────────────────────────────────────────
     const handleStarClick = useCallback((e, stock) => {
@@ -365,11 +390,15 @@ export default function Navbar({ onMenuToggle }) {
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        onFocus={() => { if (searchResults.length > 0) setShowResults(true); }}
+                        onFocus={() => {
+                            setSearchFocused(true);
+                            setShowResults((searchResults.length > 0) || (popularResults.length > 0));
+                        }}
                         onKeyDown={(e) => {
                             if (e.key === 'Escape') {
                                 setSearchQuery('');
                                 setSearchResults([]);
+                                setSearchFocused(false);
                                 setShowResults(false);
                             }
                         }}
@@ -388,7 +417,12 @@ export default function Navbar({ onMenuToggle }) {
                             className="absolute top-full left-0 mt-1 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl shadow-xl z-50 max-h-[320px] overflow-y-auto animate-slide-in"
                             style={{ minWidth: '100%', width: 'max-content' }}
                         >
-                            {searchResults.length > 0 ? searchResults.map((stock) => {
+                            {showingRecommendations && (
+                                <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-gray-500 border-b border-[var(--border)]/40">
+                                    Suggested Stocks
+                                </div>
+                            )}
+                            {dropdownResults.length > 0 ? dropdownResults.map((stock) => {
                                 const isWatchlisted = watchlistedSymbols.has(stock.symbol);
                                 const justStarred = starredNow.has(stock.symbol);
                                 return (
@@ -430,7 +464,9 @@ export default function Navbar({ onMenuToggle }) {
                                 );
                             }) : (
                                 <div className="px-4 py-3 text-center text-xs text-gray-500">
-                                    No results for &ldquo;{searchQuery.trim()}&rdquo;
+                                    {showingRecommendations
+                                        ? 'No suggestions available right now'
+                                        : `No results for “${searchQuery.trim()}”`}
                                 </div>
                             )}
                         </div>

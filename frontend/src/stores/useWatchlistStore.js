@@ -46,6 +46,15 @@ const ensureNsSuffix = (symbol = '') => {
 
 const stripExchangeSuffix = (symbol = '') => String(symbol || '').replace(/\.(NS|BO)$/i, '').toUpperCase();
 
+const toIndexWatchlistId = (indexKey = '') => {
+    const safe = String(indexKey || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return `idx_${safe || 'custom'}`;
+};
+
 const normalizeQuote = (quote = {}) => {
     const prevClose = toNumberOrNull(
         quote.prev_close ?? quote.prevClose ?? quote.close ?? quote.pc
@@ -111,13 +120,13 @@ export const useWatchlistStore = create((set, get) => ({
     // ── Load all watchlists on mount ──────────────────────────────────────────
     loadWatchlist: async () => {
         set({ isLoading: true });
-        
+
         // 1. Try to load from localStorage first (fast cache)
         const cached = loadFromStorage();
         if (cached && cached.watchlists.length > 0) {
             set({ watchlists: cached.watchlists, activeId: cached.activeId });
         }
-        
+
         try {
             // 2. Try to sync with server
             const res = await api.get('/watchlist');
@@ -176,6 +185,48 @@ export const useWatchlistStore = create((set, get) => ({
             toast.error(err.response?.data?.detail || 'Failed to create watchlist');
             return null;
         }
+    },
+
+    // ── Open/create a dedicated local watchlist for an index basket ─────────
+    openIndexWatchlist: (indexKey, indexLabel, constituentSymbols = []) => {
+        const id = toIndexWatchlistId(indexKey || indexLabel);
+        const safeLabel = String(indexLabel || 'Index').trim() || 'Index';
+
+        const normalizedItems = Array.from(
+            new Set(
+                (constituentSymbols || [])
+                    .map((sym) => ensureNsSuffix(sym))
+                    .filter(Boolean)
+            )
+        ).map((symbol, idx) => ({
+            id: `${id}_${idx}`,
+            symbol,
+            exchange: 'NSE',
+        }));
+
+        if (normalizedItems.length === 0) return;
+
+        set((s) => {
+            const existingIdx = s.watchlists.findIndex((w) => w.id === id);
+            const watchlist = {
+                id,
+                name: `${safeLabel}`,
+                items: normalizedItems,
+                isLocalIndex: true,
+            };
+
+            if (existingIdx >= 0) {
+                const next = [...s.watchlists];
+                next[existingIdx] = watchlist;
+                return { watchlists: next, activeId: id };
+            }
+            return { watchlists: [...s.watchlists, watchlist], activeId: id };
+        });
+
+        const { watchlists, activeId } = get();
+        persistToStorage(watchlists, activeId);
+        get().fetchPrices();
+        toast.success(`${safeLabel} watchlist opened`);
     },
 
     // ── Rename a watchlist (optimistic) ──────────────────────────────────────
@@ -303,7 +354,7 @@ export const useWatchlistStore = create((set, get) => ({
             // Persist rollback
             ({ watchlists: updatedWatchlists, activeId: updatedActiveId } = get());
             persistToStorage(updatedWatchlists, updatedActiveId);
-            
+
             const detail = err.response?.data?.detail;
             const status = err.response?.status;
             toast.error(
@@ -329,7 +380,7 @@ export const useWatchlistStore = create((set, get) => ({
         // Persist optimistic state
         let { watchlists: updatedWatchlists, activeId: updatedActiveId } = get();
         persistToStorage(updatedWatchlists, updatedActiveId);
-        
+
         try {
             // If it's a local watchlist, skip server sync
             if (!activeId.startsWith('local_')) {
@@ -375,19 +426,19 @@ export const useWatchlistStore = create((set, get) => ({
         if (!active || active.items.length === 0) {
             return;
         }
-        
+
         // Build comma-separated symbol list, ensuring canonical suffix exists
         const symbolList = active.items
             .map(w => ensureNsSuffix(w.symbol))
             .filter(Boolean);
 
         const symbols = symbolList.join(',');
-        
+
         if (!symbols) {
             return;
         }
-        
-        
+
+
         const normalizedQuotes = {};
         const upsertQuote = (rawKey, rawValue) => {
             const quote = normalizeQuote(rawValue || {});
