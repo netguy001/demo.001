@@ -47,15 +47,15 @@ export default function MarketPage() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 lg:w-[460px]">
-                    <div className="rounded-lg border border-edge/10 bg-surface-900/60 px-3 py-2">
+                    <div className="rounded-lg bg-surface-900/60 px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500">Advances</div>
                         <div className="text-sm font-price tabular-nums text-profit font-semibold">{stats.advances}</div>
                     </div>
-                    <div className="rounded-lg border border-edge/10 bg-surface-900/60 px-3 py-2">
+                    <div className="rounded-lg bg-surface-900/60 px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500">Declines</div>
                         <div className="text-sm font-price tabular-nums text-loss font-semibold">{stats.declines}</div>
                     </div>
-                    <div className="rounded-lg border border-edge/10 bg-surface-900/60 px-3 py-2">
+                    <div className="rounded-lg bg-surface-900/60 px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500">Unchanged</div>
                         <div className="text-sm font-price tabular-nums text-heading font-semibold">{stats.unchanged}</div>
                     </div>
@@ -67,7 +67,7 @@ export default function MarketPage() {
                     <Skeleton variant="stat-card" count={6} />
                 </div>
             ) : indices.length > 0 ? (
-                <div className="rounded-xl border border-edge/8 bg-surface-900/55 p-4 lg:p-5">
+                <div className="rounded-xl bg-surface-900/55 p-4 lg:p-5">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="section-title text-sm text-heading">Benchmark Indices</h2>
                         <span className="text-xs text-gray-500">Click an index to open terminal</span>
@@ -115,7 +115,7 @@ export default function MarketPage() {
 
             {stockItems.length > 0 && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div className="rounded-xl border border-edge/8 bg-surface-900/55 p-4">
+                    <div className="rounded-xl bg-surface-900/55 p-4">
                         <div className="flex items-center justify-between mb-3">
                             <h2 className="section-title text-sm text-heading flex items-center gap-2">
                                 <TrendingUp className="w-4.5 h-4.5 text-emerald-500" />
@@ -144,7 +144,7 @@ export default function MarketPage() {
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-edge/8 bg-surface-900/55 p-4">
+                    <div className="rounded-xl bg-surface-900/55 p-4">
                         <div className="flex items-center justify-between mb-3">
                             <h2 className="section-title text-sm text-heading flex items-center gap-2">
                                 <TrendingDown className="w-4.5 h-4.5 text-red-500" />
@@ -176,7 +176,7 @@ export default function MarketPage() {
             )}
 
             {stockItems.length === 0 && (
-                <div className="rounded-xl border border-edge/8 bg-surface-900/55 p-10 text-center">
+                <div className="rounded-xl bg-surface-900/55 p-10 text-center">
                     <Activity className="w-10 h-10 mx-auto mb-2 text-gray-500 opacity-40" />
                     <p className="text-sm text-gray-500">Top movers are not available right now.</p>
                 </div>

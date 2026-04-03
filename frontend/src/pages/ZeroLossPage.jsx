@@ -233,11 +233,6 @@ export default function ZeroLossPage() {
                                 </span>
                             )}
                         </h1>
-                        <p className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
-                            {enabled
-                                ? <>Tracking {symbolEntries.length} symbols &middot; {positionCount}/5 positions &middot; <RegimeBadge regime={marketRegime} /></>
-                                : 'Smart intraday strategy — regime-aligned, trailing stops, high-conviction trades'}
-                        </p>
                     </div>
                 </div>
 

@@ -275,14 +275,13 @@ export default function Sidebar({ collapsed, onToggle }) {
                     <p className="text-[13px] font-medium text-heading truncate leading-tight">
                       {user.full_name || user.username}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/settings?tab=profile')}
-                      className="text-[11px] text-gray-500 truncate leading-tight mt-0.5 hover:text-primary-600 transition-colors"
-                      title="Open profile settings"
+                    <a
+                      href={`mailto:${user.email}`}
+                      className="text-[11px] text-gray-500 truncate leading-tight mt-0.5 hover:text-primary-600 transition-colors cursor-pointer"
+                      title="Send email"
                     >
                       {user.email}
-                    </button>
+                    </a>
                   </div>
                 )}
               </div>
