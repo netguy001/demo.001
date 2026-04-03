@@ -262,10 +262,19 @@ export default function Sidebar({ collapsed, onToggle }) {
           {user && (
             <Tooltip content={`${user.full_name || user.username}`} position="right" delay={200}>
               <div
+                onClick={collapsed ? () => navigate('/settings?tab=profile') : undefined}
+                onKeyDown={collapsed ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate('/settings?tab=profile');
+                  }
+                } : undefined}
+                role={collapsed ? 'button' : undefined}
+                tabIndex={collapsed ? 0 : undefined}
                 className={cn(
                   "flex items-center rounded-lg mb-1 transition-all duration-200",
                   collapsed
-                    ? "justify-center py-1.5 mx-auto w-10"
+                    ? "justify-center py-1.5 mx-auto w-10 cursor-pointer hover:bg-overlay/[0.05]"
                     : "gap-2.5 px-3 py-2.5 hover:bg-overlay/[0.03]",
                 )}
               >

@@ -123,7 +123,7 @@ export default function MarketPage() {
                             </h2>
                             {topGainer ? <span className="text-xs text-emerald-500 font-price">Leader: {cleanSymbol(topGainer.symbol)}</span> : null}
                         </div>
-                        <div className="divide-y divide-edge/8 max-h-[420px] overflow-y-auto">
+                        <div className="max-h-[420px] overflow-y-auto">
                             {gainers.map((stock, i) => (
                                 <button
                                     type="button"
@@ -152,7 +152,7 @@ export default function MarketPage() {
                             </h2>
                             {topLoser ? <span className="text-xs text-red-500 font-price">Weakest: {cleanSymbol(topLoser.symbol)}</span> : null}
                         </div>
-                        <div className="divide-y divide-edge/8 max-h-[420px] overflow-y-auto">
+                        <div className="max-h-[420px] overflow-y-auto">
                             {losers.map((stock, i) => (
                                 <button
                                     type="button"
