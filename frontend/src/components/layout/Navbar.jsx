@@ -385,31 +385,43 @@ export default function Navbar({ onMenuToggle }) {
             {/* Left: search */}
             <div className="flex items-center gap-3">
                 <div className="relative hidden sm:block" ref={searchRef}>
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-                    <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onFocus={() => {
-                            setSearchFocused(true);
-                            setShowResults((searchResults.length > 0) || (popularResults.length > 0));
-                        }}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                                setSearchQuery('');
-                                setSearchResults([]);
-                                setSearchFocused(false);
-                                setShowResults(false);
-                            }
-                        }}
-                        placeholder="Search stocks… (e.g. RELIANCE, TCS)"
-                        aria-label="Stock search"
+                    <div
                         className={cn(
-                            'w-[300px] lg:w-[340px] bg-surface-800/60 border border-edge/5 rounded-lg',
-                            'pl-10 pr-10 py-2 text-sm text-heading placeholder-gray-500',
-                            'focus:outline-none focus:border-primary-500/30 transition-all duration-200'
+                            'group relative h-10 w-10 lg:w-10 rounded-lg border border-edge/5 bg-surface-800/60 overflow-hidden',
+                            'transition-[width,border-color,background-color] duration-300 ease-out',
+                            'hover:w-[300px] lg:hover:w-[340px] focus-within:w-[300px] lg:focus-within:w-[340px]',
+                            searchFocused && 'w-[300px] lg:w-[340px] border-primary-500/30'
                         )}
-                    />
+                    >
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none z-10" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onFocus={() => {
+                                setSearchFocused(true);
+                                setShowResults((searchResults.length > 0) || (popularResults.length > 0));
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                    setSearchQuery('');
+                                    setSearchResults([]);
+                                    setSearchFocused(false);
+                                    setShowResults(false);
+                                }
+                            }}
+                            placeholder="Search stocks… (e.g. RELIANCE, TCS)"
+                            aria-label="Stock search"
+                            className={cn(
+                                'absolute inset-y-0 left-0 w-full bg-transparent text-sm text-heading placeholder-gray-500',
+                                'pl-10 pr-4 focus:outline-none',
+                                'opacity-0 pointer-events-none transition-opacity duration-200 ease-out',
+                                'group-hover:opacity-100 group-hover:pointer-events-auto',
+                                'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                                searchFocused && 'opacity-100 pointer-events-auto'
+                            )}
+                        />
+                    </div>
 
                     {/* ── Autocomplete dropdown ── */}
                     {showResults && (
