@@ -14,7 +14,7 @@ import {
     CheckCircle2,
 } from 'lucide-react';
 import api from '../services/api';
-import { formatCurrency, cleanSymbol, formatQuantity, formatPercent } from '../utils/formatters';
+import { formatCurrency, cleanSymbol, formatQuantity, formatPercent, formatDate } from '../utils/formatters';
 import { Skeleton } from '../components/ui';
 import { cn } from '../utils/cn';
 import { usePortfolioStore } from '../store/usePortfolioStore';
@@ -155,9 +155,21 @@ function csvEscape(value) {
     return text;
 }
 
+function formatCustomDateLabel(value) {
+    if (!value) return 'DD MMM YYYY';
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? 'DD MMM YYYY' : formatDate(date);
+}
+
+function isValidPnlNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) && num !== 0 ? num : null;
+}
+
 export default function OrdersPage() {
     const orders = usePortfolioStore((s) => s.orders) || [];
     const refreshPortfolio = usePortfolioStore((s) => s.refreshPortfolio);
+    const portfolioSummary = usePortfolioStore((s) => s.summary);
 
     const [activeTab, setActiveTab] = useState('all');
     const [sourceFilter, setSourceFilter] = useState('all');
@@ -180,6 +192,8 @@ export default function OrdersPage() {
 
     const initializedRef = useRef(false);
     const previousOrderIdsRef = useRef(new Set());
+    const customFromInputRef = useRef(null);
+    const customToInputRef = useRef(null);
 
     const loadOrders = useCallback(async () => {
         setIsRefreshing(true);
@@ -221,10 +235,89 @@ export default function OrdersPage() {
                 tsMs: ts ? ts.getTime() : 0,
                 display_qty: Number(quantityRaw || 0),
                 avg_price: avgPriceRaw == null ? null : Number(avgPriceRaw),
-                pnl_value: pnlRaw == null || Number.isNaN(Number(pnlRaw)) ? null : Number(pnlRaw),
+                pnl_raw_value: pnlRaw == null || Number.isNaN(Number(pnlRaw)) ? null : Number(pnlRaw),
             };
         });
     }, [orders]);
+
+    const derivedOrderPnlById = useMemo(() => {
+        const books = new Map();
+        const pnlById = new Map();
+
+        const ordered = [...normalizedOrders].sort((a, b) => {
+            if (a.tsMs !== b.tsMs) return a.tsMs - b.tsMs;
+            return a.uid.localeCompare(b.uid);
+        });
+
+        ordered.forEach((order) => {
+            const kind = getStatusKind(order.status_norm);
+            const qty = Number(order.filled_quantity ?? order.display_qty ?? 0);
+            const price = Number(order.filled_price ?? order.avg_price ?? NaN);
+            const side = order.side_norm;
+            const symbol = cleanSymbol(order.symbol_norm || order.symbol || '').toUpperCase();
+
+            if (kind !== 'filled' || !symbol || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) {
+                return;
+            }
+
+            if (!books.has(symbol)) {
+                books.set(symbol, { longs: [], shorts: [] });
+            }
+
+            const book = books.get(symbol);
+            let remaining = qty;
+            let realized = 0;
+
+            if (side === 'BUY') {
+                while (remaining > 0 && book.shorts.length > 0) {
+                    const lot = book.shorts[0];
+                    const closeQty = Math.min(remaining, lot.qty);
+                    realized += (lot.price - price) * closeQty;
+                    lot.qty -= closeQty;
+                    remaining -= closeQty;
+                    if (lot.qty <= 0) book.shorts.shift();
+                }
+
+                if (remaining > 0) {
+                    book.longs.push({ qty: remaining, price });
+                }
+            } else if (side === 'SELL') {
+                while (remaining > 0 && book.longs.length > 0) {
+                    const lot = book.longs[0];
+                    const closeQty = Math.min(remaining, lot.qty);
+                    realized += (price - lot.price) * closeQty;
+                    lot.qty -= closeQty;
+                    remaining -= closeQty;
+                    if (lot.qty <= 0) book.longs.shift();
+                }
+
+                if (remaining > 0) {
+                    book.shorts.push({ qty: remaining, price });
+                }
+            }
+
+            pnlById.set(order.uid, realized !== 0 ? realized : null);
+        });
+
+        return pnlById;
+    }, [normalizedOrders]);
+
+    const derivedRealizedPnl = useMemo(() => {
+        return [...derivedOrderPnlById.values()].reduce(
+            (sum, value) => sum + (Number.isFinite(Number(value)) ? Number(value) : 0),
+            0
+        );
+    }, [derivedOrderPnlById]);
+
+    const resolvedOrders = useMemo(() => {
+        return normalizedOrders.map((order) => ({
+            ...order,
+            pnl_value: derivedOrderPnlById.get(order.uid) ?? isValidPnlNumber(order.pnl_raw_value),
+        }));
+    }, [normalizedOrders, derivedOrderPnlById]);
+
+    const backendRealizedPnl = Number(portfolioSummary?.realized_pnl);
+    const realizedPnl = Number.isFinite(backendRealizedPnl) && backendRealizedPnl !== 0 ? backendRealizedPnl : derivedRealizedPnl;
 
     useEffect(() => {
         const ids = normalizedOrders.map((o) => o.uid);
@@ -257,14 +350,10 @@ export default function OrdersPage() {
         previousOrderIdsRef.current = new Set(ids);
     }, [normalizedOrders]);
 
-    const statusUniverse = useMemo(() => {
-        return [...new Set(normalizedOrders.map((o) => o.status_norm).filter(Boolean))];
-    }, [normalizedOrders]);
-
     const filteredBaseOrders = useMemo(() => {
         const query = searchQuery.trim().toUpperCase();
 
-        return normalizedOrders.filter((order) => {
+        return resolvedOrders.filter((order) => {
             if (sourceFilter === 'manual') {
                 const isTagged = order.strategy_tag === 'ALGO' || order.strategy_tag === 'ZEROLOSS';
                 if (isTagged) return false;
@@ -299,7 +388,7 @@ export default function OrdersPage() {
 
             return haystack.includes(query);
         });
-    }, [normalizedOrders, sourceFilter, dateRange, customFromDate, customToDate, sideFilter, productFilter, searchQuery]);
+    }, [resolvedOrders, sourceFilter, dateRange, customFromDate, customToDate, sideFilter, productFilter, searchQuery]);
 
     const tabCounts = useMemo(() => {
         return filteredBaseOrders.reduce(
@@ -368,7 +457,6 @@ export default function OrdersPage() {
         const filled = filteredBaseOrders.filter((o) => getStatusKind(o.status_norm) === 'filled').length;
         const pending = filteredBaseOrders.filter((o) => getStatusKind(o.status_norm) === 'pending').length;
         const rejected = filteredBaseOrders.filter((o) => getStatusKind(o.status_norm) === 'rejected').length;
-        const realizedPnl = filteredBaseOrders.reduce((sum, order) => sum + (Number(order.pnl_value) || 0), 0);
         const grossTurnover = filteredBaseOrders
             .filter((o) => getStatusKind(o.status_norm) === 'filled')
             .reduce((sum, order) => {
@@ -387,7 +475,7 @@ export default function OrdersPage() {
             grossTurnover,
             fillRate: totalOrders > 0 ? (filled / totalOrders) * 100 : 0,
         };
-    }, [filteredBaseOrders]);
+    }, [filteredBaseOrders, realizedPnl]);
 
     const visibleGrossTurnover = useMemo(() => {
         return sortedVisibleOrders
@@ -399,8 +487,6 @@ export default function OrdersPage() {
                 return sum + qty * price;
             }, 0);
     }, [sortedVisibleOrders]);
-
-    const statusSamples = useMemo(() => statusUniverse.slice(0, 8).join(', '), [statusUniverse]);
 
     const onSort = useCallback((key) => {
         setSortConfig((prev) => {
@@ -538,6 +624,18 @@ export default function OrdersPage() {
         };
     }, [activeTab, searchQuery]);
 
+    const openDatePicker = useCallback((inputRef) => {
+        const input = inputRef.current;
+        if (!input) return;
+
+        if (typeof input.showPicker === 'function') {
+            input.showPicker();
+            return;
+        }
+
+        input.click();
+    }, []);
+
     if (isRefreshing && normalizedOrders.length === 0) {
         return (
             <div className="p-4 lg:p-6 space-y-6">
@@ -588,7 +686,7 @@ export default function OrdersPage() {
                 <div className="glass-card p-4">
                     <p className="text-[11px] uppercase tracking-wide text-gray-500">Filled</p>
                     <p className="mt-1 text-xl font-semibold text-heading tabular-nums">{formatQuantity(summary.filled)}</p>
-                    <p className="mt-1 text-[11px] text-gray-500">{formatPercent(summary.fillRate, 0)} fill rate</p>
+                    <p className="mt-1 text-[11px] text-gray-500">{formatPercent(summary.fillRate, 0, false)} fill rate</p>
                 </div>
                 <div className="glass-card p-4">
                     <p className="text-[11px] uppercase tracking-wide text-gray-500">Pending</p>
@@ -622,7 +720,7 @@ export default function OrdersPage() {
                                 className={cn(
                                     'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
                                     activeTab === tab.key
-                                        ? 'border-primary-500/30 bg-primary-500/15 text-primary-600'
+                                        ? 'border-primary-500/30 bg-primary-500/15 text-primary-600 shadow-sm'
                                         : 'border-edge/10 bg-surface-900/40 text-gray-500 hover:border-edge/20 hover:text-heading'
                                 )}
                             >
@@ -644,10 +742,11 @@ export default function OrdersPage() {
                                 key={filter.key}
                                 type="button"
                                 onClick={() => setSourceFilter(filter.key)}
+                                aria-pressed={sourceFilter === filter.key}
                                 className={cn(
                                     'rounded border px-2.5 py-1 text-[11px] font-medium transition-colors',
                                     sourceFilter === filter.key
-                                        ? 'border-primary-500/30 bg-primary-500/15 text-primary-600'
+                                        ? 'border-primary-500/30 bg-primary-500/15 text-primary-600 shadow-sm'
                                         : 'border-edge/10 bg-surface-900/40 text-gray-500 hover:border-edge/20 hover:text-heading'
                                 )}
                             >
@@ -669,7 +768,7 @@ export default function OrdersPage() {
                                 onClick={() => setDateRange(filter.key)}
                                 className={cn(
                                     'rounded px-2 py-1 text-[11px] font-medium transition-colors',
-                                    dateRange === filter.key ? 'bg-primary-500/15 text-primary-600' : 'text-gray-500 hover:text-heading'
+                                    dateRange === filter.key ? 'bg-primary-500/15 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-heading'
                                 )}
                             >
                                 {filter.label}
@@ -679,18 +778,44 @@ export default function OrdersPage() {
 
                     {dateRange === 'custom' && (
                         <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => openDatePicker(customFromInputRef)}
+                                className="inline-flex h-8 min-w-[132px] items-center justify-between gap-2 rounded-lg border border-edge/10 bg-surface-900/40 px-3 text-xs font-medium text-heading transition-colors hover:border-edge/20"
+                            >
+                                <span className={cn(customFromDate ? 'text-heading' : 'text-gray-500')}>
+                                    {formatCustomDateLabel(customFromDate)}
+                                </span>
+                                <CalendarDays className="h-3.5 w-3.5 text-gray-500" />
+                            </button>
+                            <span className="text-[11px] text-gray-500">to</span>
+                            <button
+                                type="button"
+                                onClick={() => openDatePicker(customToInputRef)}
+                                className="inline-flex h-8 min-w-[132px] items-center justify-between gap-2 rounded-lg border border-edge/10 bg-surface-900/40 px-3 text-xs font-medium text-heading transition-colors hover:border-edge/20"
+                            >
+                                <span className={cn(customToDate ? 'text-heading' : 'text-gray-500')}>
+                                    {formatCustomDateLabel(customToDate)}
+                                </span>
+                                <CalendarDays className="h-3.5 w-3.5 text-gray-500" />
+                            </button>
                             <input
+                                ref={customFromInputRef}
                                 type="date"
                                 value={customFromDate}
                                 onChange={(e) => setCustomFromDate(e.target.value)}
-                                className="h-8 rounded border border-edge/10 bg-surface-900/40 px-2 text-xs text-heading"
+                                className="sr-only"
+                                tabIndex={-1}
+                                aria-hidden="true"
                             />
-                            <span className="text-xs text-gray-500">to</span>
                             <input
+                                ref={customToInputRef}
                                 type="date"
                                 value={customToDate}
                                 onChange={(e) => setCustomToDate(e.target.value)}
-                                className="h-8 rounded border border-edge/10 bg-surface-900/40 px-2 text-xs text-heading"
+                                className="sr-only"
+                                tabIndex={-1}
+                                aria-hidden="true"
                             />
                         </div>
                     )}
@@ -701,10 +826,11 @@ export default function OrdersPage() {
                                 key={value}
                                 type="button"
                                 onClick={() => setSideFilter(value === 'All' ? 'all' : value)}
+                                aria-pressed={sideFilter === (value === 'All' ? 'all' : value)}
                                 className={cn(
                                     'rounded px-2 py-1 text-[11px] font-medium transition-colors',
                                     sideFilter === (value === 'All' ? 'all' : value)
-                                        ? 'bg-primary-500/15 text-primary-600'
+                                        ? 'bg-primary-500/15 text-primary-600 shadow-sm'
                                         : 'text-gray-500 hover:text-heading'
                                 )}
                             >
@@ -719,10 +845,11 @@ export default function OrdersPage() {
                                 key={value}
                                 type="button"
                                 onClick={() => setProductFilter(value === 'All' ? 'all' : value)}
+                                aria-pressed={productFilter === (value === 'All' ? 'all' : value)}
                                 className={cn(
                                     'rounded px-2 py-1 text-[11px] font-medium transition-colors',
                                     productFilter === (value === 'All' ? 'all' : value)
-                                        ? 'bg-primary-500/15 text-primary-600'
+                                        ? 'bg-primary-500/15 text-primary-600 shadow-sm'
                                         : 'text-gray-500 hover:text-heading'
                                 )}
                             >
@@ -742,10 +869,6 @@ export default function OrdersPage() {
                         />
                     </div>
                 </div>
-            </div>
-
-            <div className="text-[11px] text-gray-600">
-                Status values from live data: {statusSamples || '—'}
             </div>
 
             {sortedVisibleOrders.length > 0 ? (
