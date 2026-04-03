@@ -54,11 +54,12 @@ const WatchlistItem = memo(function WatchlistItem({
     }, [price?.price]);
 
     // ── Fetch constituent prices when expanded ────────────────────────────────
+    const constituentSuffix = (item.exchange || '').toUpperCase() === 'BSE' ? '.BO' : '.NS';
     const fetchConstituentPrices = useCallback(async () => {
         if (!constituents || constituents.length === 0) return;
         setLoadingConstituents(true);
         try {
-            const symbols = constituents.map(s => `${s}.NS`).join(',');
+            const symbols = constituents.map(s => `${s}${constituentSuffix}`).join(',');
             const res = await api.get(`/market/batch?symbols=${encodeURIComponent(symbols)}`);
             const quotes = res.data?.quotes ?? {};
             // Normalize: store under both RELIANCE.NS and RELIANCE so lookup always works
@@ -88,7 +89,10 @@ const WatchlistItem = memo(function WatchlistItem({
     const changePositive = (price?.change ?? price?.change_percent ?? 0) >= 0;
     const rawSymbol = item.symbol || '';
     const symbol = rawSymbol.replace('.NS', '').replace('.BO', '').replace(/^\^/, '');
-    const exchange = item.exchange || 'NSE';
+    const exchange = item.exchange || (rawSymbol.endsWith('.BO') ? 'BSE' : 'NSE');
+    const chartSymbol = rawSymbol.startsWith('^') || rawSymbol.endsWith('.NS') || rawSymbol.endsWith('.BO')
+        ? rawSymbol
+        : exchange === 'BSE' ? `${rawSymbol}.BO` : `${rawSymbol}.NS`;
 
     return (
         <div className="border-b border-edge/[0.03]">
@@ -148,8 +152,7 @@ const WatchlistItem = memo(function WatchlistItem({
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    const sym = item.symbol?.startsWith('^') || item.symbol?.endsWith('.NS') ? item.symbol : `${item.symbol}.NS`;
-                                    navigate(`/terminal?symbol=${encodeURIComponent(sym)}`);
+                                    navigate(`/terminal?symbol=${encodeURIComponent(chartSymbol)}`);
                                 }}
                                 className="p-1 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-500/10 transition-colors"
                                 title="Open chart"
@@ -210,7 +213,7 @@ const WatchlistItem = memo(function WatchlistItem({
                     ) : (
                         <div className="max-h-64 overflow-y-auto divide-y divide-slate-200/40 dark:divide-slate-700/30">
                             {constituents.map(base => {
-                                const sym = `${base}.NS`;
+                                const sym = `${base}${constituentSuffix}`;
                                 const p = constituentPrices[sym] ?? constituentPrices[base] ?? {};
                                 const chg = p.change_percent ?? 0;
                                 const chgPos = chg >= 0;

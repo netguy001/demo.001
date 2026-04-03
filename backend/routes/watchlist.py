@@ -25,32 +25,57 @@ class AddItemRequest(BaseModel):
     exchange: str = "NSE"
 
 
-def _canonical_watchlist_symbol(symbol: str) -> str:
+def _canonical_watchlist_symbol(symbol: str, exchange: str = "NSE") -> str:
     base = (symbol or "").strip().upper()
     if not base:
         return ""
     if base.startswith("^") or base.endswith(".NS") or base.endswith(".BO"):
         return base
+    if exchange == "BSE":
+        return f"{base}.BO"
     return f"{base}.NS"
 
 
+# Each entry: (watchlist_name, [symbols...], exchange)
 DEFAULT_WATCHLIST_SEEDS = [
-    ("Watchlist 1", []),
-    ("NIFTY 50", ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", "ITC", "LT", "AXISBANK", "BHARTIARTL"]),
-    ("BANKNIFTY", ["HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN", "INDUSINDBK", "BANDHANBNK", "AUBANK", "FEDERALBNK"]),
-    ("SENSEX", ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "LT", "SBIN", "ITC", "AXISBANK", "BHARTIARTL"]),
-    ("NIFTY IT", ["INFY", "TCS", "HCLTECH", "TECHM", "WIPRO", "LTIM", "PERSISTENT"]),
+    ("Watchlist 1", [], "NSE"),
+    ("NIFTY 50", [
+        "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
+        "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BHARTIARTL", "BPCL",
+        "BRITANNIA", "CIPLA", "COALINDIA", "DIVISLAB", "DRREDDY",
+        "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE",
+        "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "INDUSINDBK",
+        "INFY", "ITC", "JIOFIN", "JSWSTEEL", "KOTAKBANK",
+        "LT", "M&M", "MARUTI", "NESTLEIND", "NTPC",
+        "ONGC", "POWERGRID", "RELIANCE", "SBIN", "SBILIFE",
+        "SUNPHARMA", "TATAMOTORS", "TATACONSUM", "TATASTEEL", "TCS",
+        "TECHM", "TITAN", "TRENT", "ULTRACEMCO", "WIPRO",
+    ], "NSE"),
+    ("BANKNIFTY", [
+        "HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN",
+        "INDUSINDBK", "BANDHANBNK", "FEDERALBNK", "IDFCFIRSTB", "AUBANK",
+        "PNB", "BANKBARODA",
+    ], "NSE"),
+    ("SENSEX", [
+        "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
+        "LT", "SBIN", "ITC", "BHARTIARTL", "AXISBANK",
+        "BAJFINANCE", "KOTAKBANK", "HCLTECH", "WIPRO", "MARUTI",
+        "SUNPHARMA", "TITAN", "BAJAJFINSV", "POWERGRID", "NTPC",
+        "TATASTEEL", "ASIANPAINT", "NESTLEIND", "M&M", "ULTRACEMCO",
+        "TATAMOTORS", "TRENT", "ADANIPORTS", "JSWSTEEL", "HDFCLIFE",
+    ], "BSE"),
 ]
 
-DEFAULT_WATCHLIST_NAMES = {name.strip().lower() for name, _ in DEFAULT_WATCHLIST_SEEDS}
+DEFAULT_WATCHLIST_NAMES = {name.strip().lower() for name, _, _exch in DEFAULT_WATCHLIST_SEEDS}
 
-# Legacy auto-seeded lists from previous deployments. These should be removed
-# so users only see the current default lists plus their own custom watchlists.
+# Legacy auto-seeded lists from previous deployments. These are removed on
+# next login so users only see Watchlist 1 + the 3 market indices.
 LEGACY_DEFAULT_WATCHLIST_NAMES = {
     'my watchlist',
     'bank nifty',
-    'nifty pharma',
+    'nifty it',
     'nifty auto',
+    'nifty pharma',
     'nifty fmcg',
     'nifty metal',
     'nifty next 50',
@@ -62,7 +87,7 @@ def _default_watchlist_sort_key(name: str) -> tuple[int, str]:
     normalized = str(name or '').strip().lower()
     if normalized == 'watchlist 1':
         return (0, normalized)
-    for index, (seed_name, _) in enumerate(DEFAULT_WATCHLIST_SEEDS, start=1):
+    for index, (seed_name, _, _exch) in enumerate(DEFAULT_WATCHLIST_SEEDS, start=1):
         if normalized == seed_name.strip().lower():
             return (index, normalized)
     return (999, normalized)
@@ -70,7 +95,7 @@ def _default_watchlist_sort_key(name: str) -> tuple[int, str]:
 
 async def _seed_missing_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID, existing_names: set[str]):
     seeded = []
-    for name, symbols in DEFAULT_WATCHLIST_SEEDS:
+    for name, symbols, exchange in DEFAULT_WATCHLIST_SEEDS:
         if name.strip().lower() in existing_names:
             continue
         watchlist_id = uuid.uuid4().hex
@@ -91,7 +116,7 @@ async def _seed_missing_default_watchlists(db: AsyncSession, user_uuid: uuid.UUI
         items = []
         for symbol in symbols:
             item_id = uuid.uuid4().hex
-            canonical_symbol = _canonical_watchlist_symbol(symbol)
+            canonical_symbol = _canonical_watchlist_symbol(symbol, exchange)
             await db.execute(
                 text(
                     """
@@ -103,10 +128,10 @@ async def _seed_missing_default_watchlists(db: AsyncSession, user_uuid: uuid.UUI
                     "id": item_id,
                     "watchlist_id": watchlist_id,
                     "symbol": canonical_symbol,
-                    "exchange": "NSE",
+                    "exchange": exchange,
                 },
             )
-            items.append({"id": item_id, "symbol": canonical_symbol, "exchange": "NSE"})
+            items.append({"id": item_id, "symbol": canonical_symbol, "exchange": exchange})
 
         seeded.append({"id": watchlist_id, "name": name, "items": items})
 
@@ -117,6 +142,48 @@ async def _seed_missing_default_watchlists(db: AsyncSession, user_uuid: uuid.UUI
 
 async def _seed_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID):
     return await _seed_missing_default_watchlists(db, user_uuid, set())
+
+
+async def _repair_default_watchlists(db: AsyncSession, watchlist_rows) -> bool:
+    """For existing users: add any missing seed symbols to default watchlists.
+
+    Only inserts symbols that are absent — never removes user-added symbols.
+    Returns True if any rows were changed.
+    """
+    changed = False
+    for name, symbols, exchange in DEFAULT_WATCHLIST_SEEDS:
+        if not symbols:
+            continue
+        matching_row = next(
+            (r for r in watchlist_rows if str(r[1]).strip().lower() == name.strip().lower()),
+            None,
+        )
+        if not matching_row:
+            continue
+        wl_id = matching_row[0]
+
+        existing_result = await db.execute(
+            text("SELECT UPPER(symbol) FROM watchlist_items WHERE watchlist_id = :wid"),
+            {"wid": wl_id},
+        )
+        existing_symbols = {row[0] for row in existing_result.fetchall()}
+
+        for symbol in symbols:
+            canonical = _canonical_watchlist_symbol(symbol, exchange)
+            if canonical.upper() not in existing_symbols:
+                item_id = uuid.uuid4().hex
+                await db.execute(
+                    text(
+                        "INSERT INTO watchlist_items (id, watchlist_id, symbol, exchange) "
+                        "VALUES (:id, :wid, :symbol, :exchange)"
+                    ),
+                    {"id": item_id, "wid": wl_id, "symbol": canonical, "exchange": exchange},
+                )
+                changed = True
+
+    if changed:
+        await db.commit()
+    return changed
 
 
 async def _remove_legacy_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID, watchlist_rows):
@@ -195,6 +262,9 @@ async def get_watchlists(
                 {"uid_dash": user_id_dash, "uid_hex": user_id_hex},
             )
             watchlist_rows = result.fetchall()
+
+        # Repair existing default watchlists that are missing seed symbols (e.g. old partial seeds)
+        await _repair_default_watchlists(db, watchlist_rows)
 
         watchlist_rows = sorted(watchlist_rows, key=lambda row: _default_watchlist_sort_key(row[1]))
 
