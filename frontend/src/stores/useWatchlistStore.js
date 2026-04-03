@@ -92,6 +92,8 @@ const normalizeWatchlists = (watchlists = []) =>
         items: normalizeWatchlistItems(watchlist?.items || []),
     }));
 
+const BATCH_CHUNK_SIZE = 20;
+
 const toIndexWatchlistId = (indexKey = '') => {
     const safe = String(indexKey || '')
         .trim()
@@ -515,18 +517,33 @@ export const useWatchlistStore = create((set, get) => ({
             }
         };
 
-        let batchFailed = false;
-        try {
-            const res = await api.get(`/market/batch?symbols=${encodeURIComponent(symbols)}`);
-            const quotes = res.data.quotes || {};
-            Object.entries(quotes).forEach(([key, value]) => upsertQuote(key, value));
-        } catch (err) {
-            batchFailed = true;
-            // Don't log cancelled requests (rate limit backoff)
-            if (err?.message !== 'Rate limited — backing off') {
-                console.warn('[Watchlist] Batch fetch failed:', err.message);
-            }
+        const chunks = [];
+        for (let i = 0; i < symbolList.length; i += BATCH_CHUNK_SIZE) {
+            chunks.push(symbolList.slice(i, i + BATCH_CHUNK_SIZE));
         }
+
+        let successfulChunks = 0;
+        const batchResults = await Promise.allSettled(
+            chunks.map((chunk) =>
+                api.get(`/market/batch?symbols=${encodeURIComponent(chunk.join(','))}`)
+            )
+        );
+
+        batchResults.forEach((result) => {
+            if (result.status === 'fulfilled') {
+                successfulChunks += 1;
+                const quotes = result.value?.data?.quotes || {};
+                Object.entries(quotes).forEach(([key, value]) => upsertQuote(key, value));
+                return;
+            }
+
+            const err = result.reason;
+            if (err?.message !== 'Rate limited — backing off') {
+                console.warn('[Watchlist] Batch chunk fetch failed:', err?.message || err);
+            }
+        });
+
+        const batchFailed = successfulChunks === 0;
 
         // Only do per-symbol fallback if batch SUCCEEDED but some symbols were missing
         // (NOT when batch failed entirely — that would just create more 429 errors)
@@ -537,8 +554,8 @@ export const useWatchlistStore = create((set, get) => ({
                 return !(normalizedQuotes[withNs] || normalizedQuotes[withoutNs]);
             });
 
-            if (missingSymbols.length > 0 && missingSymbols.length <= 3) {
-                // Only fallback for a few missing symbols, not the entire list
+            if (missingSymbols.length > 0 && missingSymbols.length <= 10) {
+                // Fallback only for a bounded subset to avoid request storms.
                 const quoteResults = await Promise.allSettled(
                     missingSymbols.map((sym) =>
                         api.get(`/market/quote/${encodeURIComponent(sym)}`)

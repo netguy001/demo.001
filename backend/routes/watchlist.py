@@ -145,9 +145,10 @@ async def _seed_default_watchlists(db: AsyncSession, user_uuid: uuid.UUID):
 
 
 async def _repair_default_watchlists(db: AsyncSession, watchlist_rows) -> bool:
-    """For existing users: add any missing seed symbols to default watchlists.
+    """For existing users: enforce exact default constituents for seeded index watchlists.
 
-    Only inserts symbols that are absent — never removes user-added symbols.
+    - Inserts missing seed symbols
+    - Removes symbols that are not part of the current seed set
     Returns True if any rows were changed.
     """
     changed = False
@@ -163,10 +164,23 @@ async def _repair_default_watchlists(db: AsyncSession, watchlist_rows) -> bool:
         wl_id = matching_row[0]
 
         existing_result = await db.execute(
-            text("SELECT UPPER(symbol) FROM watchlist_items WHERE watchlist_id = :wid"),
+            text("SELECT id, UPPER(symbol) FROM watchlist_items WHERE watchlist_id = :wid"),
             {"wid": wl_id},
         )
-        existing_symbols = {row[0] for row in existing_result.fetchall()}
+        existing_rows = existing_result.fetchall()
+        existing_symbols = {row[1] for row in existing_rows}
+        desired_symbols = {
+            _canonical_watchlist_symbol(symbol, exchange).upper() for symbol in symbols
+        }
+
+        # Remove stale / unwanted symbols so default index watchlists stay clean.
+        for item_id, existing_symbol in existing_rows:
+            if existing_symbol not in desired_symbols:
+                await db.execute(
+                    text("DELETE FROM watchlist_items WHERE id = :id"),
+                    {"id": item_id},
+                )
+                changed = True
 
         for symbol in symbols:
             canonical = _canonical_watchlist_symbol(symbol, exchange)

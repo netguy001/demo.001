@@ -421,18 +421,6 @@ async def batch_quotes(
         except (asyncio.TimeoutError, Exception) as e:
             logger.debug(f"Batch quotes timeout/error: {e}")
 
-    # Demo fallback: fill any remaining symbols with synthetic quotes.
-    if settings.SIMULATION_MODE and not _strict_zebu_only():
-        still_missing = [sym for sym in symbol_list if not _has_quote(results, sym)]
-        for sym in still_missing:
-            try:
-                sim_quote = market_data.get_simulated_stock_quote(sym)
-                normalized = market_data._normalize_quote(sim_quote)
-                if normalized:
-                    _upsert_aliases(results, sym, normalized)
-            except Exception as e:
-                logger.debug(f"Simulated quote fallback failed for {sym}: {e}")
-
     # Normalize all final quotes to standard format before returning
     final_quotes = {}
     for sym, q in results.items():
