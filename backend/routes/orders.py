@@ -16,6 +16,7 @@ from services.trading_engine import (
     _update_portfolio_on_fill,
     _to_decimal,
 )
+from services.portfolio_service import invalidate_user_portfolio_cache
 from services import market_data
 from providers.symbol_mapper import is_mcx_symbol
 from engines.market_session import market_session
@@ -275,6 +276,7 @@ async def close_all_positions(
             logger.error(f"[KillSwitch] Error closing {holding.symbol}: {e}")
 
     await db.commit()
+    invalidate_user_portfolio_cache(str(user.id))
 
     return {
         "success": True,

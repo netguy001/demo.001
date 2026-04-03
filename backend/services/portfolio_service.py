@@ -133,7 +133,7 @@ async def get_portfolio_summary(db: AsyncSession, user_id: str) -> dict:
         return empty
 
     result = await db.execute(
-        select(Holding).where(Holding.portfolio_id == portfolio.id)
+        select(Holding).where(Holding.portfolio_id == portfolio.id, Holding.quantity != 0)
     )
     holdings = result.scalars().all()
 
@@ -212,7 +212,7 @@ async def get_holdings(db: AsyncSession, user_id: str) -> list:
         return []
 
     result = await db.execute(
-        select(Holding).where(Holding.portfolio_id == portfolio.id)
+        select(Holding).where(Holding.portfolio_id == portfolio.id, Holding.quantity != 0)
     )
     holdings = result.scalars().all()
 
