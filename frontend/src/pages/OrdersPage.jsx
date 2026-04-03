@@ -246,7 +246,6 @@ export default function OrdersPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-display font-semibold text-heading">Orders</h1>
-                    <p className="text-gray-500 text-sm mt-0.5">Professional order book with clean execution analytics</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <button

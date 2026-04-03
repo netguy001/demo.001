@@ -153,7 +153,6 @@ export default function CommoditiesPage() {
                 <div>
                     <h1 className="text-2xl font-display font-semibold text-heading">Commodities</h1>
                     <div className="flex items-center gap-2 mt-1">
-                        <p className="text-gray-500 text-sm">MCX & NCDEX commodity futures</p>
                         {/* Connection + source badge */}
                         {wsStatus === 'connected' ? (
                             <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium">

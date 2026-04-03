@@ -408,7 +408,6 @@ export default function FuturesPage() {
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-display font-bold text-heading">Options Chain</h1>
-                    <p className="text-gray-500 text-sm mt-1">Professional options trading data with Greeks & IV</p>
                 </div>
                 <div className="flex gap-2">
                     <Badge variant="primary" className="font-semibold">Simulation Data Only</Badge>

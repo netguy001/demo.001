@@ -159,7 +159,6 @@ export default function DashboardWorkspace() {
                     <h1 className="text-2xl font-display font-semibold text-heading">
                         Welcome, {user?.full_name?.split(' ')[0] || user?.username || 'Trader'}
                     </h1>
-                    <p className="text-slate-600 dark:text-slate-400 text-sm mt-0.5">Your trading overview</p>
                 </div>
                 <Link to="/terminal" className="btn-primary text-sm hidden sm:inline-flex items-center gap-2" aria-label="Open trading terminal">
                     Trade Now <ArrowRight className="w-4 h-4" />

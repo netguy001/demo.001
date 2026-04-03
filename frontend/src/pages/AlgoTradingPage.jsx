@@ -280,7 +280,6 @@ export default function AlgoTradingPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-display font-semibold text-heading">Algo Trading</h1>
-                    <p className="text-gray-500 text-sm mt-0.5">Create and manage automated trading strategies</p>
                 </div>
                 <button onClick={() => setShowCreate(!showCreate)} className="btn-primary text-sm inline-flex items-center gap-2">
                     {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}

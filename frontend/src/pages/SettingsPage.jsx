@@ -739,7 +739,6 @@ export default function SettingsPage() {
     <div className="p-4 lg:p-6 max-w-4xl animate-fade-in">
       <div className="mb-6">
         <h1 className="text-2xl font-display font-semibold text-heading">Settings</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Manage your account preferences</p>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-6">

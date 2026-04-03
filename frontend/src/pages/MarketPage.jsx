@@ -44,7 +44,6 @@ export default function MarketPage() {
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-display font-semibold text-heading">Market</h1>
-                    <p className="text-gray-500 text-sm mt-0.5">Clean market board with indices, breadth and top movers</p>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 lg:w-[460px]">

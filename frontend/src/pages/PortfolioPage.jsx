@@ -176,7 +176,6 @@ export default function PortfolioPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-display font-semibold text-heading">Portfolio &amp; P/L</h1>
-                    <p className="text-gray-500 text-sm mt-0.5">Clean trading desk view of capital, M2M, P&amp;L and recent trade flow</p>
                 </div>
                 <Link to="/terminal" className="btn-primary text-sm hidden sm:inline-flex items-center gap-2">
                     Open Terminal <ArrowRight className="w-4 h-4" />

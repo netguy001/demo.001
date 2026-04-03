@@ -104,7 +104,6 @@ export default function VerifyEmailPage() {
           </div>
 
           <h1 className="text-2xl font-bold text-slate-900 mb-2">Verify your email</h1>
-          <p className="text-sm text-slate-500 mb-1">We've sent a verification link to</p>
           <p className="text-sm font-semibold text-slate-800 mb-6">{email || "your email address"}</p>
 
           {!statePassword && (
