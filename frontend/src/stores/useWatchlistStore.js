@@ -77,6 +77,21 @@ const canonicalizeWatchlistSymbol = (symbol = '', exchange = 'NSE') => {
     return ensureNsSuffix(upper);
 };
 
+const normalizeWatchlistItems = (items = []) =>
+    (items || []).map((item) => {
+        const normalizedSymbol = canonicalizeWatchlistSymbol(item?.symbol, item?.exchange || 'NSE');
+        return {
+            ...item,
+            symbol: normalizedSymbol || String(item?.symbol || '').toUpperCase(),
+        };
+    });
+
+const normalizeWatchlists = (watchlists = []) =>
+    sanitizeWatchlists(watchlists || []).map((watchlist) => ({
+        ...watchlist,
+        items: normalizeWatchlistItems(watchlist?.items || []),
+    }));
+
 const toIndexWatchlistId = (indexKey = '') => {
     const safe = String(indexKey || '')
         .trim()
@@ -155,7 +170,7 @@ export const useWatchlistStore = create((set, get) => ({
         // 1. Try to load from localStorage first (fast cache)
         const cached = loadFromStorage();
         if (cached && cached.watchlists.length > 0) {
-            const sanitizedCached = sanitizeWatchlists(cached.watchlists);
+            const sanitizedCached = normalizeWatchlists(cached.watchlists);
             const nextActiveId = sanitizedCached.some((w) => w.id === cached.activeId)
                 ? cached.activeId
                 : sanitizedCached[0]?.id ?? null;
@@ -165,7 +180,7 @@ export const useWatchlistStore = create((set, get) => ({
         try {
             // 2. Try to sync with server
             const res = await api.get('/watchlist');
-            const wls = sanitizeWatchlists(res.data.watchlists || []);
+            const wls = normalizeWatchlists(res.data.watchlists || []);
             if (wls.length > 0) {
                 const nextActiveId = cached?.activeId && wls.some((w) => w.id === cached.activeId)
                     ? cached.activeId

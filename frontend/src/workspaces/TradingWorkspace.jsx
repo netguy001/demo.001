@@ -460,6 +460,7 @@ export default function TradingWorkspace() {
             <div className="terminal-area-chart min-w-0 min-h-0 relative overflow-hidden">
                 <ErrorBoundary fallback="Chart failed to load. Please refresh.">
                     <ZebuLiveChart
+                        key={selectedSymbol}
                         candles={candles}
                         isLoading={chartLoading}
                         trendData={trendData}

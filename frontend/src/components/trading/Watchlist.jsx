@@ -17,13 +17,25 @@ const getPriceForSymbol = (primaryPrices, fallbackPrices, symbol) => {
     if (!raw) return {};
 
     const upper = raw.toUpperCase();
-    const withNs = upper.endsWith('.NS') || upper.endsWith('.BO') || upper.startsWith('^') ? upper : `${upper}.NS`;
+    const isExplicitExchange = upper.endsWith('.NS') || upper.endsWith('.BO') || upper.startsWith('^');
+    const withNs = isExplicitExchange ? upper : `${upper}.NS`;
     const withoutNs = upper.replace(/\.(NS|BO)$/i, '');
 
-    const fromPrimary = primaryPrices[upper] ?? primaryPrices[withNs] ?? primaryPrices[withoutNs];
-    if (fromPrimary?.price != null) return fromPrimary;
+    const candidates = isExplicitExchange
+        ? [upper, withoutNs]
+        : [withNs, upper, withoutNs];
 
-    return fallbackPrices[upper] ?? fallbackPrices[withNs] ?? fallbackPrices[withoutNs] ?? fromPrimary ?? {};
+    for (const key of candidates) {
+        const quote = primaryPrices[key];
+        if (quote?.price != null) return quote;
+    }
+
+    for (const key of candidates) {
+        const quote = fallbackPrices[key];
+        if (quote?.price != null) return quote;
+    }
+
+    return {};
 };
 
 // ── Main component ─────────────────────────────────────────────────────────────
