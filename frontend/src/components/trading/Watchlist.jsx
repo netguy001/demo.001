@@ -138,7 +138,7 @@ export default function Watchlist({
         <div className="flex flex-col h-full border-r border-edge/5 bg-surface-900/60">
 
             {/* ── TOP SEARCH BAR ───────────────────────────────────────── */}
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-edge/5 bg-surface-900/40 flex-shrink-0">
+            <div className="flex items-center px-3 py-2 border-b border-edge/5 bg-surface-900/40 flex-shrink-0">
                 <button
                     onClick={() => setSidebarOpen(true)}
                     className="flex-shrink-0 h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:text-heading hover:bg-surface-800/60 transition-colors"
@@ -149,12 +149,15 @@ export default function Watchlist({
 
                 <button
                     onClick={() => setModalOpen(true)}
-                    className="flex-1 h-9 px-3 rounded-lg border border-edge/10 bg-surface-800/35 text-left flex items-center gap-2 text-gray-500 hover:text-heading hover:border-edge/20 transition-colors"
+                    className="flex-shrink-0 h-9 w-9 rounded-lg flex items-center justify-center text-gray-500 hover:text-heading hover:bg-surface-800/60 transition-colors"
                     title="Search or add symbol"
                 >
                     <Search className="w-4 h-4 flex-shrink-0" />
-                    <span className="truncate text-sm">Search or add symbol…</span>
                 </button>
+
+                <div className="flex-1 text-center text-sm font-semibold font-sans text-heading tracking-wide select-none">
+                    Watchlist
+                </div>
 
                 <button
                     onClick={() => setCreateModalOpen(true)}
