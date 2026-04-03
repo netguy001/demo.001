@@ -27,6 +27,23 @@ def _to_decimal(value) -> Decimal:
     return Decimal(str(value))
 
 
+def _normalize_available_capital(
+    available_capital: Decimal,
+    net_equity: Decimal,
+    holdings_count: int,
+) -> Decimal:
+    """Keep cash and equity internally consistent.
+
+    - Cash should never exceed net equity.
+    - When there are no holdings, cash should match net equity.
+    """
+    if holdings_count <= 0:
+        return net_equity
+    if available_capital > net_equity:
+        return net_equity
+    return available_capital
+
+
 def invalidate_user_portfolio_cache(user_id: str) -> None:
     portfolio_cache.invalidate_prefix(f"summary:{user_id}")
     holdings_cache.invalidate_prefix(f"holdings:{user_id}")
@@ -179,7 +196,12 @@ async def get_portfolio_summary(db: AsyncSession, user_id: str) -> dict:
     total_pnl_percent = (total_pnl / pnl_denominator * 100) if pnl_denominator else 0
     net_equity = base_capital + total_pnl
 
-    available_capital = _to_decimal(portfolio.available_capital)
+    available_capital = _normalize_available_capital(
+        _to_decimal(portfolio.available_capital),
+        net_equity,
+        len(holdings),
+    )
+    portfolio.available_capital = available_capital
 
     summary = {
         "total_invested": float(round(total_invested_gross, 2)),

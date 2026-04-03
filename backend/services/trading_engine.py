@@ -23,6 +23,14 @@ def _invalidate_portfolio_cache(user_id: str) -> None:
     holdings_cache.invalidate_prefix(f"holdings:{user_id}")
 
 
+def _normalize_available_capital(available_capital: Decimal, net_equity: Decimal, holdings_count: int) -> Decimal:
+    if holdings_count <= 0:
+        return net_equity
+    if available_capital > net_equity:
+        return net_equity
+    return available_capital
+
+
 def _to_decimal(value) -> Decimal:
     if isinstance(value, Decimal):
         return value
@@ -523,6 +531,12 @@ async def _recalculate_portfolio(db: AsyncSession, portfolio: Portfolio):
     base_capital = _to_decimal(user_result.scalar_one_or_none() or 0)
     abs_total_invested = abs(total_invested) if total_invested else 0
     pnl_denominator = abs(base_capital) if base_capital else abs_total_invested
+    net_equity = base_capital + total_pnl + unrealized_pnl
+    portfolio.available_capital = _normalize_available_capital(
+        _to_decimal(portfolio.available_capital or 0),
+        net_equity,
+        len(holdings),
+    )
     portfolio.total_pnl_percent = (
         ((total_pnl + unrealized_pnl) / pnl_denominator * 100) if pnl_denominator else 0
     )

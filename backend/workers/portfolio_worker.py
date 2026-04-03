@@ -30,6 +30,14 @@ def _to_decimal(value) -> Decimal:
     return Decimal(str(value))
 
 
+def _normalize_available_capital(available_capital: Decimal, net_equity: Decimal, holdings_count: int) -> Decimal:
+    if holdings_count <= 0:
+        return net_equity
+    if available_capital > net_equity:
+        return net_equity
+    return available_capital
+
+
 class PortfolioRecalcWorker:
     """
     Recalculates portfolio on order fills.
@@ -335,6 +343,12 @@ class PortfolioRecalcWorker:
             abs(base_capital)
             if base_capital
             else (abs(total_invested_value) if total_invested_value else Decimal("0"))
+        )
+        net_equity = base_capital + realized_pnl + unrealized_pnl
+        portfolio.available_capital = _normalize_available_capital(
+            _to_decimal(portfolio.available_capital or 0),
+            net_equity,
+            len(holdings),
         )
         portfolio.total_pnl_percent = (
             ((realized_pnl + unrealized_pnl) / pnl_denominator * 100)
