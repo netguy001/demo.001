@@ -7,6 +7,13 @@ import { useMarketStore } from '../store/useMarketStore';
 // Survives symbol switches so switching back to a recent symbol is instant.
 const _candleCache = new Map();
 const CANDLE_CACHE_TTL = 60_000; // 60 s — matches backend SmartCache TTL
+const PREFETCH_PERIODS = [
+    { period: '1d', interval: '1m' },
+    { period: '1d', interval: '5m' },
+    { period: '5d', interval: '15m' },
+    { period: '1mo', interval: '1h' },
+    { period: '1y', interval: '1d' },
+];
 
 function getLatestCachedCandlesForSymbol(symbol) {
     let latest = null;
@@ -209,6 +216,39 @@ export function useMarketData(symbol, { pollInterval = 10_000 } = {}) {
                 setIsLoading(false);
             }
         }
+    }, [symbol, normalizeCandles]);
+
+    // Warm common timeframe caches in background so period changes feel instant.
+    useEffect(() => {
+        if (!symbol) return;
+
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            for (const cfg of PREFETCH_PERIODS) {
+                if (cancelled || isRateLimited()) break;
+                const cacheKey = `${symbol}:${cfg.period}:${cfg.interval}`;
+                const existing = _candleCache.get(cacheKey);
+                if (existing && Date.now() - existing.ts < CANDLE_CACHE_TTL) {
+                    continue;
+                }
+
+                try {
+                    const res = await api.get(
+                        `/market/history/${encodeURIComponent(symbol)}?period=${cfg.period}&interval=${cfg.interval}`
+                    );
+                    if (cancelled) break;
+                    const normalized = normalizeCandles(res.data?.candles || []);
+                    _candleCache.set(cacheKey, { candles: normalized, ts: Date.now() });
+                } catch {
+                    // Keep prefetch failures silent so normal chart flow stays unaffected.
+                }
+            }
+        }, 250);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
     }, [symbol, normalizeCandles]);
 
     // On symbol change — clear stale candles immediately and fetch fresh quote.

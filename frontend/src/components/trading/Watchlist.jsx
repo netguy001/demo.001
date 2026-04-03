@@ -12,6 +12,39 @@ import {
 import { useWatchlistStore } from '../../stores/useWatchlistStore';
 import { useMarketStore } from '../../store/useMarketStore';
 
+const STALE_QUOTE_MS = 10 * 60 * 1000;
+
+const toQuoteAge = (quote) => {
+    const updatedAt = Number(quote?._updatedAt);
+    if (!Number.isFinite(updatedAt) || updatedAt <= 0) return 0;
+    return Date.now() - updatedAt;
+};
+
+const pickBestQuote = (sources, candidates) => {
+    const entries = [];
+
+    for (const src of sources) {
+        for (const key of candidates) {
+            const quote = src?.[key];
+            if (quote?.price == null) continue;
+            const age = toQuoteAge(quote);
+            entries.push({ quote, age });
+        }
+    }
+
+    if (entries.length === 0) return {};
+
+    const freshEntries = entries.filter((e) => e.age <= STALE_QUOTE_MS);
+    const pool = freshEntries.length > 0 ? freshEntries : entries;
+
+    // Pick the newest candidate in the selected pool.
+    let best = pool[0];
+    for (let i = 1; i < pool.length; i += 1) {
+        if (pool[i].age < best.age) best = pool[i];
+    }
+    return best.quote;
+};
+
 const getPriceForSymbol = (primaryPrices, fallbackPrices, symbol) => {
     const raw = String(symbol || '').trim();
     if (!raw) return {};
@@ -25,17 +58,7 @@ const getPriceForSymbol = (primaryPrices, fallbackPrices, symbol) => {
         ? [upper, withoutNs]
         : [withNs, upper, withoutNs];
 
-    for (const key of candidates) {
-        const quote = primaryPrices[key];
-        if (quote?.price != null) return quote;
-    }
-
-    for (const key of candidates) {
-        const quote = fallbackPrices[key];
-        if (quote?.price != null) return quote;
-    }
-
-    return {};
+    return pickBestQuote([fallbackPrices, primaryPrices], candidates);
 };
 
 // ── Main component ─────────────────────────────────────────────────────────────
@@ -82,14 +105,17 @@ export default function Watchlist({
     // ── Focus helpers ─────────────────────────────────────────────────────────
     const sortedWatchlists = useMemo(() => watchlists, [watchlists]);
 
-    // ── Fetch prices when item count changes ──────────────────────────────────
-    const itemCountRef = useRef(items.length);
+    // ── Fetch prices whenever active watchlist symbols change ─────────────────
+    const itemSignature = useMemo(
+        () => items.map((item) => String(item?.symbol || '').toUpperCase()).join('|'),
+        [items]
+    );
+
     useEffect(() => {
-        if (items.length > 0 && items.length !== itemCountRef.current) {
-            itemCountRef.current = items.length;
+        if (activeId && items.length > 0) {
             fetchPrices();
         }
-    }, [items.length, fetchPrices]);
+    }, [activeId, itemSignature, items.length, fetchPrices]);
 
     const updateTabScroll = useCallback(() => {
         const el = tabsRef.current;
