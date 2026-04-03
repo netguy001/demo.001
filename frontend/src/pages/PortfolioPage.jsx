@@ -22,7 +22,7 @@ function MetricCard({ label, value, delta, icon: Icon, emphasize = false }) {
     const numeric = Number(value ?? 0);
     const toneClass = emphasize ? pnlColorClass(numeric) : 'text-heading';
     return (
-        <div className={cn('kpi-card', emphasize && 'bg-surface-900/70 border-edge/15')}>
+        <div className="kpi-card bg-surface-900/70 border-edge/15">
             <div className="flex items-center justify-between">
                 <span className="metric-label">{label}</span>
                 {Icon ? (
