@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMarketIndicesStore } from '../stores/useMarketIndicesStore';
 import { TrendingUp, TrendingDown, BarChart3, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
 import { formatPrice, formatPercent, pnlColorClass, cleanSymbol } from '../utils/formatters';
 import { Skeleton } from '../components/ui';
 import { cn } from '../utils/cn';
+import api from '../services/api';
 
 export default function MarketPage() {
     const navigate = useNavigate();
@@ -12,14 +13,71 @@ export default function MarketPage() {
     const tickerItems = useMarketIndicesStore((s) => s.tickerItems);
     const isLoading = useMarketIndicesStore((s) => s.isLoading);
     const fetchIndices = useMarketIndicesStore((s) => s.fetchIndices);
+    const fetchTicker = useMarketIndicesStore((s) => s.fetchTicker);
+    const [fallbackStockItems, setFallbackStockItems] = useState([]);
 
     // MarketTickerBar (in AppShell) manages the shared polling interval.
     // This page only triggers a one-time refresh of the indices list on mount.
     useEffect(() => {
         fetchIndices();
-    }, [fetchIndices]);
+        fetchTicker();
+    }, [fetchIndices, fetchTicker]);
 
-    const stockItems = (tickerItems || []).filter((t) => t.symbol && !t.symbol.startsWith('^'));
+    useEffect(() => {
+        let active = true;
+
+        const loadFallbackStocks = async () => {
+            try {
+                const popularRes = await api.get('/market/popular');
+                const symbols = (popularRes.data?.stocks || [])
+                    .map((s) => String(s || '').trim().toUpperCase())
+                    .filter(Boolean)
+                    .slice(0, 20);
+
+                if (symbols.length === 0) return;
+
+                const quotesRes = await api.get('/market/batch', {
+                    params: { symbols: symbols.join(',') },
+                });
+
+                const quotes = quotesRes.data?.quotes || {};
+                const rows = symbols
+                    .map((symbol) => {
+                        const q = quotes[symbol] || quotes[`${symbol}.NS`] || quotes[symbol.replace('.NS', '')];
+                        if (!q) return null;
+                        return {
+                            symbol,
+                            price: Number(q.price ?? 0),
+                            change: Number(q.change ?? 0),
+                            change_percent: Number(q.change_percent ?? 0),
+                            kind: 'stock',
+                        };
+                    })
+                    .filter((item) => item && Number.isFinite(item.price));
+
+                if (active) {
+                    setFallbackStockItems(rows);
+                }
+            } catch {
+                if (active) {
+                    setFallbackStockItems([]);
+                }
+            }
+        };
+
+        loadFallbackStocks();
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const stockItemsFromTicker = (tickerItems || []).filter((item) => {
+        if (!item?.symbol) return false;
+        if (item.kind) return item.kind === 'stock';
+        const label = `${item.symbol} ${item.name || ''}`.toUpperCase();
+        return !label.includes('NIFTY') && !label.includes('SENSEX') && !label.includes('VIX');
+    });
+    const stockItems = stockItemsFromTicker.length > 0 ? stockItemsFromTicker : fallbackStockItems;
     const gainers = [...stockItems]
         .filter((s) => s.change_percent > 0)
         .sort((a, b) => b.change_percent - a.change_percent)
