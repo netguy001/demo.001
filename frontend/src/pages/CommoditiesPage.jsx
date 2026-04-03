@@ -9,7 +9,7 @@ import { Skeleton } from '../components/ui';
 import { cn } from '../utils/cn';
 import {
     Gem, Flame, Wheat,
-    Search, TrendingUp, TrendingDown, Radio, Wifi, WifiOff,
+    Search, TrendingUp, TrendingDown, Radio,
 } from 'lucide-react';
 
 /* ─── Category config ──────────────────────────────────────── */
@@ -153,23 +153,10 @@ export default function CommoditiesPage() {
                 <div>
                     <h1 className="text-2xl font-display font-semibold text-heading">Commodities</h1>
                     <div className="flex items-center gap-2 mt-1">
-                        {/* Connection + source badge */}
-                        {wsStatus === 'connected' ? (
-                            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium">
-                                <Wifi className="w-3 h-3" /> WS LIVE
-                            </span>
-                        ) : (
-                            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-500/10 text-gray-400 font-medium">
-                                <WifiOff className="w-3 h-3" /> {wsStatus}
-                            </span>
-                        )}
+                        {/* Source badge */}
                         {source === 'live' ? (
                             <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">
                                 <Radio className="w-3 h-3" /> Zebu
-                            </span>
-                        ) : source === 'simulated' ? (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 font-medium">
-                                SIMULATED
                             </span>
                         ) : null}
                     </div>

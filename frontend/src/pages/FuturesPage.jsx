@@ -411,7 +411,6 @@ export default function FuturesPage() {
                 </div>
                 <div className="flex gap-2">
                     <Badge variant="primary" className="font-semibold">Simulation Data Only</Badge>
-                    <Badge variant="secondary" className="font-semibold">Professional View</Badge>
                 </div>
             </div>
 
@@ -471,7 +470,7 @@ export default function FuturesPage() {
                 <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-edge/5">
                     <div className="flex gap-2">
                         {[
-                            { mode: 'standard', label: 'Standard', icon: '📊' },
+                            { mode: 'standard', label: 'Standard', icon: '◧' },
                             { mode: 'greeks', label: 'Greeks', icon: 'Δ' },
                             { mode: 'iv', label: 'IV Analysis', icon: '◐' },
                         ].map(({ mode, label, icon }) => (
