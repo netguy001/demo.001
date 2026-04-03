@@ -7,7 +7,6 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 import { useLivePortfolio } from '../../hooks/useLivePortfolio';
 import { useTheme } from '../../context/ThemeContext';
 import { cn } from '../../utils/cn';
-import { LS_SIDEBAR } from '../../utils/constants';
 
 // Root font-size for rem-based scaling (Tailwind uses rem for text-sm, text-xs, etc.)
 const FONT_SIZE_PX = { small: '14px', medium: '16px', large: '18px' };
@@ -42,26 +41,27 @@ export default function AppShell() {
     // ── Global portfolio polling — keeps P&L updated even when WS is down ───
     useLivePortfolio();
 
-    // ── Sidebar state — persisted to localStorage ─────────────────────────────
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-        const stored = localStorage.getItem(LS_SIDEBAR);
-        if (stored !== null) return stored === 'true';
-        return true; // default collapsed
-    });
+    // ── Sidebar state — default collapsed, expands on hover (desktop) ───────
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
-    const toggle = () => {
-        setSidebarCollapsed((prev) => {
-            const next = !prev;
-            localStorage.setItem(LS_SIDEBAR, String(next));
-            return next;
-        });
+    const isDesktop = () => window.innerWidth >= 1024;
+
+    const handleSidebarHoverEnter = () => {
+        if (!isDesktop()) return;
+        setSidebarCollapsed(false);
     };
+
+    const handleSidebarHoverLeave = () => {
+        if (!isDesktop()) return;
+        setSidebarCollapsed(true);
+    };
+
+    const closeSidebar = () => setSidebarCollapsed(true);
 
     // Auto-close sidebar on mobile when navigating
     useEffect(() => {
         if (window.innerWidth < 1024) {
             setSidebarCollapsed(true);
-            localStorage.setItem(LS_SIDEBAR, 'true');
         }
     }, [location.pathname]);
 
@@ -74,7 +74,9 @@ export default function AppShell() {
         )}>
             <Sidebar
                 collapsed={sidebarCollapsed}
-                onToggle={toggle}
+                onToggle={closeSidebar}
+                onHoverEnter={handleSidebarHoverEnter}
+                onHoverLeave={handleSidebarHoverLeave}
             />
 
             <div
@@ -83,7 +85,7 @@ export default function AppShell() {
                     sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-[240px]'
                 )}
             >
-                <Navbar onMenuToggle={toggle} />
+                <Navbar onMenuToggle={closeSidebar} />
                 <MarketTickerBar />
 
                 {/* Page content — terminal gets no overflow (grid handles it) */}

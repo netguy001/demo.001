@@ -11,8 +11,6 @@ import {
   Shield,
   Settings,
   LogOut,
-  PanelLeftClose,
-  PanelLeftOpen,
   Globe,
   ClipboardList,
   Landmark,
@@ -125,11 +123,14 @@ function SidebarItem({ to, icon: Icon, label, collapsed }) {
       }
     >
       <Icon className="w-5 h-5 flex-shrink-0" />
-      {!collapsed && (
-        <span className="whitespace-nowrap">
-          {label}
-        </span>
-      )}
+      <span
+        className={cn(
+          "whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+          collapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-[140px]"
+        )}
+      >
+        {label}
+      </span>
     </NavLink>
   );
 
@@ -145,15 +146,17 @@ function SidebarItem({ to, icon: Icon, label, collapsed }) {
 
 /* ─── Section label ──────────────────────────────────────── */
 function SectionLabel({ label, collapsed }) {
-  if (collapsed) return <div className="h-2" />;
   return (
-    <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400 select-none">
+    <p className={cn(
+      "px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400 select-none transition-all duration-200 ease-in-out overflow-hidden whitespace-nowrap",
+      collapsed ? "opacity-0 max-h-0 py-0" : "opacity-100 max-h-8"
+    )}>
       {label}
     </p>
   );
 }
 
-export default function Sidebar({ collapsed, onToggle }) {
+export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeave }) {
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user); // reactive — updates instantly on photo change
   const navigate = useNavigate();
@@ -176,10 +179,12 @@ export default function Sidebar({ collapsed, onToggle }) {
 
       <aside
         style={{ width: collapsed ? SIDEBAR_COLLAPSED_W : SIDEBAR_EXPANDED_W }}
+        onMouseEnter={onHoverEnter}
+        onMouseLeave={onHoverLeave}
         className={cn(
           "fixed left-0 top-0 h-screen z-40 flex flex-col",
           "bg-[var(--bg-base)] border-r border-edge/10",
-          "transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
+          "transition-[width] duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
           collapsed
             ? "max-lg:-translate-x-full"
             : "max-lg:translate-x-0 max-lg:w-[240px]",
@@ -212,27 +217,6 @@ export default function Sidebar({ collapsed, onToggle }) {
                 />
               </a>
             )}
-            <button
-              onClick={onToggle}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className={cn(
-                "group flex-shrink-0 inline-flex items-center justify-center",
-                "rounded-xl border border-edge/10 bg-surface-900/40 backdrop-blur-sm",
-                "text-slate-500 dark:text-slate-400",
-                "hover:text-heading hover:bg-surface-800/70 hover:border-edge/20",
-                "active:scale-[0.98]",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-base)]",
-                "transition-all duration-200",
-                collapsed ? "h-8 w-8 mt-0.5" : "h-9 w-9",
-              )}
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {collapsed ? (
-                <PanelLeftOpen className="w-4 h-4 transition-transform duration-200 group-hover:scale-105" />
-              ) : (
-                <PanelLeftClose className="w-4 h-4 transition-transform duration-200 group-hover:scale-105" />
-              )}
-            </button>
           </div>
           {/* Tagline — only visible when collapsed (expanded version is inline with logo) */}
         </div>
@@ -279,8 +263,12 @@ export default function Sidebar({ collapsed, onToggle }) {
                 )}
               >
                 <UserAvatar user={user} size={8} />
-                {!collapsed && (
-                  <div className="min-w-0">
+                <div
+                  className={cn(
+                    "min-w-0 overflow-hidden transition-all duration-200 ease-in-out",
+                    collapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-[180px]"
+                  )}
+                >
                     <button
                       type="button"
                       onClick={() => navigate('/settings?tab=profile')}
@@ -296,8 +284,7 @@ export default function Sidebar({ collapsed, onToggle }) {
                     >
                       {user.email}
                     </a>
-                  </div>
-                )}
+                </div>
               </div>
             </Tooltip>
           )}
@@ -317,11 +304,14 @@ export default function Sidebar({ collapsed, onToggle }) {
             }
           >
             <Settings className="w-[18px] h-[18px] flex-shrink-0" />
-            {!collapsed && (
-              <span className="text-[13px] font-medium whitespace-nowrap">
-                Settings
-              </span>
-            )}
+            <span
+              className={cn(
+                "text-[13px] font-medium whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+                collapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-[140px]"
+              )}
+            >
+              Settings
+            </span>
           </NavLink>
 
           {/* Logout */}
@@ -335,11 +325,14 @@ export default function Sidebar({ collapsed, onToggle }) {
             )}
           >
             <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
-            {!collapsed && (
-              <span className="text-[13px] font-medium whitespace-nowrap">
-                Log Out
-              </span>
-            )}
+            <span
+              className={cn(
+                "text-[13px] font-medium whitespace-nowrap overflow-hidden transition-all duration-200 ease-in-out",
+                collapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-[140px]"
+              )}
+            >
+              Log Out
+            </span>
           </button>
         </div>
       </aside>
