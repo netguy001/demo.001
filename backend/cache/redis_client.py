@@ -105,14 +105,37 @@ class PriceCache:
             key = _key("price", symbol)
             ts_key = _key("price", symbol, "ts")
             pipe = self._redis.pipeline()
-            pipe.set(key, json.dumps(quote), ex=PRICE_TTL)
+            payload = json.dumps(quote, separators=(",", ":"))
+            pipe.set(key, payload, ex=PRICE_TTL)
             pipe.set(ts_key, str(time.time()), ex=PRICE_TTL)
             # Also update the batch hash for bulk reads
-            pipe.hset(_key("price", "all"), symbol, json.dumps(quote))
+            pipe.hset(_key("price", "all"), symbol, payload)
             await pipe.execute()
             return True
         except Exception as e:
             logger.warning(f"Redis set_price failed for {symbol}: {e}")
+            return False
+
+    async def set_prices_batch(self, quotes: dict[str, dict]) -> bool:
+        """Store multiple quotes in Redis using a single pipeline round-trip."""
+        if not self._redis or not quotes:
+            return False
+
+        try:
+            batch_key = _key("price", "all")
+            now = str(time.time())
+            pipe = self._redis.pipeline()
+            for symbol, quote in quotes.items():
+                payload = json.dumps(quote, separators=(",", ":"))
+                pipe.set(_key("price", symbol), payload, ex=PRICE_TTL)
+                pipe.set(_key("price", symbol, "ts"), now, ex=PRICE_TTL)
+                pipe.hset(batch_key, symbol, payload)
+            await pipe.execute()
+            return True
+        except Exception as e:
+            logger.warning(
+                f"Redis set_prices_batch failed ({len(quotes)} symbols): {e}"
+            )
             return False
 
     async def get_price(self, symbol: str) -> Optional[dict]:
@@ -282,7 +305,9 @@ class PriceCache:
 
     # ── Historical OHLCV cache ──────────────────────────────────────
 
-    async def set_history(self, symbol: str, period: str, interval: str, candles: list) -> None:
+    async def set_history(
+        self, symbol: str, period: str, interval: str, candles: list
+    ) -> None:
         """Cache OHLCV candles for a symbol."""
         if not self._redis:
             return
@@ -290,12 +315,14 @@ class PriceCache:
             await self._redis.setex(
                 _key("history", symbol, period, interval),
                 300,  # 5 min TTL for candles
-                json.dumps(candles)
+                json.dumps(candles),
             )
         except Exception as e:
             logger.debug(f"Redis set_history({symbol}) failed: {e}")
 
-    async def get_history(self, symbol: str, period: str, interval: str) -> Optional[list]:
+    async def get_history(
+        self, symbol: str, period: str, interval: str
+    ) -> Optional[list]:
         """Get cached candles for a symbol."""
         if not self._redis:
             return None
@@ -331,6 +358,7 @@ def _get_redis_url(redis_url: Optional[str] = None) -> str:
         return redis_url
     try:
         from config.settings import settings
+
         url = getattr(settings, "REDIS_URL", None)
         if url:
             return url
@@ -347,7 +375,10 @@ async def get_redis(redis_url: Optional[str] = None) -> PriceCache:
     if _price_cache is None:
         _price_cache = PriceCache(_get_redis_url(redis_url))
         await _price_cache.connect()
-    elif not _price_cache.is_connected and (now - _last_reconnect_attempt) > _RECONNECT_INTERVAL:
+    elif (
+        not _price_cache.is_connected
+        and (now - _last_reconnect_attempt) > _RECONNECT_INTERVAL
+    ):
         # Redis was down at startup or dropped — try to reconnect periodically.
         _last_reconnect_attempt = now
         await _price_cache.connect()
@@ -365,10 +396,17 @@ async def close_redis() -> None:
 
 # ── Convenience module-level functions ──────────────────────────────────────
 
+
 async def set_price(symbol: str, quote: dict) -> None:
     """Write a price/quote to Redis."""
     cache = await get_redis()
     await cache.set_price(symbol, quote)
+
+
+async def set_prices_batch(quotes: dict[str, dict]) -> bool:
+    """Write multiple prices to Redis in one pipeline."""
+    cache = await get_redis()
+    return await cache.set_prices_batch(quotes)
 
 
 async def get_price(symbol: str) -> Optional[dict]:

@@ -18,6 +18,7 @@ import logging
 from config.settings import settings
 from core.event_bus import event_bus, Event, EventType
 from engines.market_session import market_session, MarketState
+from cache.smart_cache import quote_cache
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,8 @@ class MarketDataWorker:
     ACTIVE_INTERVAL = 3  # seconds between full sweeps
     IDLE_INTERVAL = 60  # seconds when market closed
     NO_SESSION_INTERVAL = 10  # seconds when no broker sessions
-    SYMBOL_DELAY = (
-        0.05  # OPTIMIZED: 50ms between symbols (was 300ms) = 3x faster sweeps
-    )
+    BATCH_SIZE = 16
+    BATCH_TIMEOUT_SECONDS = 2.5
 
     def __init__(self):
         self._running = False
@@ -58,6 +58,75 @@ class MarketDataWorker:
             "symbols": list(self._subscribed_symbols),
             "symbol_count": len(self._subscribed_symbols),
         }
+
+    @staticmethod
+    def _chunked(items: list[str], size: int) -> list[list[str]]:
+        return [items[i : i + size] for i in range(0, len(items), size)]
+
+    @staticmethod
+    def _build_ticker_items(quotes_by_symbol: dict[str, dict]) -> list[dict]:
+        from services.market_data import (
+            POPULAR_INDIAN_STOCKS,
+            INDIAN_INDICES,
+            POPULAR_COMMODITIES,
+        )
+
+        ticker_items: list[dict] = []
+
+        for idx in INDIAN_INDICES:
+            q = quotes_by_symbol.get(idx["symbol"])
+            if q:
+                item = dict(q)
+                item["name"] = idx["name"]
+                item["kind"] = "index"
+                ticker_items.append(item)
+
+        for stock in POPULAR_INDIAN_STOCKS:
+            q = quotes_by_symbol.get(stock["symbol"])
+            if q:
+                item = dict(q)
+                item["name"] = stock["name"]
+                item["kind"] = "stock"
+                ticker_items.append(item)
+
+        for comm in POPULAR_COMMODITIES:
+            q = quotes_by_symbol.get(comm["symbol"])
+            if q:
+                item = dict(q)
+                item["name"] = comm["name"]
+                item["kind"] = "commodity"
+                item["exchange"] = comm["exchange"]
+                item["category"] = comm["category"]
+                item["unit"] = comm["unit"]
+                item["lot"] = comm.get("lot", 1)
+                ticker_items.append(item)
+
+        return ticker_items
+
+    async def _publish_quotes(
+        self, quotes_by_symbol: dict[str, dict], source: str
+    ) -> None:
+        if not quotes_by_symbol:
+            return
+
+        self._stats["emits"] += len(quotes_by_symbol)
+
+        try:
+            from cache.redis_client import set_prices_batch
+
+            await set_prices_batch(quotes_by_symbol)
+        except Exception as _re:
+            logger.debug(f"Redis batch write skipped ({source}): {_re}")
+
+        for symbol, normalized in quotes_by_symbol.items():
+            quote_cache.set(f"q:{symbol}", normalized, ttl=5)
+            await event_bus.emit(
+                Event(
+                    type=EventType.PRICE_UPDATED,
+                    data={"symbol": symbol, "quote": normalized},
+                    source=source,
+                )
+            )
 
     async def run(self) -> None:
         """Main loop — started via asyncio.create_task in lifespan."""
@@ -113,28 +182,14 @@ class MarketDataWorker:
                             from services.market_data import get_public_ticker_data
 
                             items = await get_public_ticker_data()
-                            for item in items:
-                                symbol = item.get("symbol")
-                                if symbol:
-                                    self._stats["emits"] += 1
-
-                                    # Also cache yfinance fallback data in Redis
-                                    try:
-                                        from cache.redis_client import set_price
-
-                                        await set_price(symbol, item)
-                                    except Exception as _re:
-                                        logger.debug(
-                                            f"Redis yf write skipped for {symbol}: {_re}"
-                                        )
-
-                                    await event_bus.emit(
-                                        Event(
-                                            type=EventType.PRICE_UPDATED,
-                                            data={"symbol": symbol, "quote": item},
-                                            source="market_data_worker_yf",
-                                        )
-                                    )
+                            quotes_by_symbol = {
+                                item.get("symbol"): item
+                                for item in items
+                                if item.get("symbol")
+                            }
+                            await self._publish_quotes(
+                                quotes_by_symbol, source="market_data_worker_yf"
+                            )
                         except Exception as e:
                             logger.debug(f"yfinance fallback emit failed: {e}")
                     await asyncio.sleep(self.NO_SESSION_INTERVAL)
@@ -142,44 +197,32 @@ class MarketDataWorker:
 
                 # Sweep all subscribed symbols
                 symbols = list(self._subscribed_symbols)
+                sweep_quotes: dict[str, dict] = {}
 
                 if symbols:
-                    for symbol in symbols:
+                    for batch in self._chunked(symbols, self.BATCH_SIZE):
                         if not self._running:
                             break
 
-                        quote = await provider.get_quote(symbol)
-                        if quote:
-                            # Normalize quote to standard format
-                            from services.market_data import _normalize_quote
+                        try:
+                            quotes = await asyncio.wait_for(
+                                provider.get_batch_quotes(batch),
+                                timeout=self.BATCH_TIMEOUT_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.debug(
+                                f"MarketDataWorker batch timeout ({len(batch)} symbols)"
+                            )
+                            continue
+                        except Exception as e:
+                            logger.debug(f"MarketDataWorker batch fetch failed: {e}")
+                            continue
 
-                            normalized = _normalize_quote(quote)
-                            if normalized:
-                                self._stats["emits"] += 1
-
-                                # Write to Redis cache so all API endpoints can serve this
-                                # without hitting Zebu again — this is the shared data hub
-                                try:
-                                    from cache.redis_client import set_price
-
-                                    await set_price(symbol, normalized)
-                                except Exception as _re:
-                                    logger.debug(
-                                        f"Redis write skipped for {symbol}: {_re}"
-                                    )
-
-                                await event_bus.emit(
-                                    Event(
-                                        type=EventType.PRICE_UPDATED,
-                                        data={
-                                            "symbol": symbol,
-                                            "quote": normalized,
-                                        },
-                                        source="market_data_worker",
-                                    )
-                                )
-
-                        await asyncio.sleep(self.SYMBOL_DELAY)
+                        if quotes:
+                            sweep_quotes.update(quotes)
+                            await self._publish_quotes(
+                                quotes, source="market_data_worker"
+                            )
 
                 self._stats["sweeps"] += 1
 
@@ -189,37 +232,9 @@ class MarketDataWorker:
                     from cache.redis_client import (
                         set_ticker,
                         set_indices,
-                        get_price as redis_get_price,
-                    )
-                    from services.market_data import (
-                        POPULAR_INDIAN_STOCKS,
-                        INDIAN_INDICES,
-                        POPULAR_COMMODITIES,
                     )
 
-                    ticker_items = []
-                    for idx in INDIAN_INDICES:
-                        q = await redis_get_price(idx["symbol"])
-                        if q:
-                            q["name"] = idx["name"]
-                            q["kind"] = "index"
-                            ticker_items.append(q)
-                    for stock in POPULAR_INDIAN_STOCKS:
-                        q = await redis_get_price(stock["symbol"])
-                        if q:
-                            q["name"] = stock["name"]
-                            q["kind"] = "stock"
-                            ticker_items.append(q)
-                    for comm in POPULAR_COMMODITIES:
-                        q = await redis_get_price(comm["symbol"])
-                        if q:
-                            q["name"] = comm["name"]
-                            q["kind"] = "commodity"
-                            q["exchange"] = comm["exchange"]
-                            q["category"] = comm["category"]
-                            q["unit"] = comm["unit"]
-                            q["lot"] = comm.get("lot", 1)
-                            ticker_items.append(q)
+                    ticker_items = self._build_ticker_items(sweep_quotes)
                     if ticker_items:
                         await set_ticker(ticker_items)
                         await set_indices(
