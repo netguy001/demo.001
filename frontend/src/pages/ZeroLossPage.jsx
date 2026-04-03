@@ -4,7 +4,7 @@ import { cn } from '../utils/cn';
 import { pnlColorClass, formatPrice, formatPercent, cleanSymbol, formatCurrency } from '../utils/formatters';
 import { useZeroLossStore } from '../stores/useZeroLossStore';
 import {
-    ShieldCheck, Play, Pause, RefreshCw, Zap, TrendingUp, TrendingDown,
+    ShieldCheck, Play, Pause, Zap, TrendingUp, TrendingDown,
     Activity, Target, AlertTriangle, Clock, BarChart3, Eye, Compass,
 } from 'lucide-react';
 
@@ -248,11 +248,6 @@ export default function ZeroLossPage() {
                     >
                         <Clock className="w-3 h-3" /> {liveClockStr}
                     </span>
-                    <button onClick={fetchAll}
-                        className="p-2 rounded-lg border border-edge/10 bg-surface-800/60 text-gray-400 hover:text-heading hover:border-edge/20 transition-all"
-                        title="Refresh">
-                        <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
                     <button onClick={handleToggle} disabled={toggling}
                         className={cn(
                             'flex items-center gap-2 px-4 py-2 rounded-xl border font-semibold text-sm transition-all duration-200 shadow-lg',
