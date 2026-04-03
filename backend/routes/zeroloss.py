@@ -17,12 +17,21 @@ dependency (Firebase ID token).
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 
 from routes.auth import get_current_user
 from models.user import User
 from strategies.zeroloss.manager import zeroloss_manager
+from strategies.zeroloss.controller import (
+    IST,
+    MARKET_SETTLE_TIME,
+    NO_NEW_ENTRY_TIME,
+    LUNCH_START,
+    LUNCH_END,
+)
 from core.event_bus import event_bus, Event, EventType
 from services import market_data
+from engines.market_session import market_session, MarketState
 
 router = APIRouter(prefix="/api/zeroloss", tags=["ZeroLoss Strategy"])
 
@@ -41,6 +50,54 @@ class ConfigUpdate(BaseModel):
 
 def _controller_for_user(user: User):
     return zeroloss_manager.get_controller(user.id)
+
+
+def _zeroloss_start_block_reason() -> Optional[dict]:
+    """Return a reason dict when strategy start should be blocked, else None."""
+    if market_session.simulation_mode:
+        return None
+
+    state = market_session.get_current_state()
+
+    if state == MarketState.HOLIDAY:
+        return {
+            "code": "MARKET_HOLIDAY",
+            "message": "Market holiday today — ZeroLoss cannot be started.",
+        }
+
+    if state == MarketState.WEEKEND:
+        return {
+            "code": "MARKET_WEEKEND",
+            "message": "Market is closed for weekend — ZeroLoss cannot be started.",
+        }
+
+    if not market_session.is_trading_hours():
+        return {
+            "code": "MARKET_CLOSED",
+            "message": "Market is currently closed. Start during NSE trading hours.",
+        }
+
+    now_ist = datetime.now(IST).time()
+
+    if now_ist < MARKET_SETTLE_TIME:
+        return {
+            "code": "ENTRY_WINDOW_NOT_OPEN",
+            "message": "Market just opened. ZeroLoss starts after 09:30 IST.",
+        }
+
+    if LUNCH_START <= now_ist <= LUNCH_END:
+        return {
+            "code": "ENTRY_WINDOW_LUNCH",
+            "message": "Entry window paused for lunch session (12:15–13:15 IST).",
+        }
+
+    if now_ist >= NO_NEW_ENTRY_TIME:
+        return {
+            "code": "ENTRY_WINDOW_TIMES_UP",
+            "message": "Entry window is over for today (after 14:45 IST).",
+        }
+
+    return None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -82,6 +139,10 @@ async def zeroloss_toggle(user: User = Depends(get_current_user)):
             "closed_positions": closed,
         }
     else:
+        blocked = _zeroloss_start_block_reason()
+        if blocked:
+            raise HTTPException(status_code=400, detail=blocked)
+
         await zeroloss_manager.enable(user.id)
         return {
             "enabled": True,

@@ -155,6 +155,7 @@ export default function ZeroLossPage() {
 
     const [toggling, setToggling] = useState(false);
     const [showLog, setShowLog] = useState(true);
+    const [nowMs, setNowMs] = useState(Date.now());
     const logRef = useRef(null);
 
     useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -164,13 +165,22 @@ export default function ZeroLossPage() {
         return () => clearInterval(id);
     }, [fetchAll]);
 
+    useEffect(() => {
+        const id = setInterval(() => setNowMs(Date.now()), 1_000);
+        return () => clearInterval(id);
+    }, []);
+
     const handleToggle = async () => {
         setToggling(true);
         try {
             const res = await toggle();
             toast.success(res.message);
-        } catch {
-            toast.error('Failed to toggle strategy');
+        } catch (err) {
+            const detail = err?.response?.data?.detail;
+            const message = typeof detail === 'string'
+                ? detail
+                : detail?.message || 'Failed to toggle strategy';
+            toast.error(message);
         } finally {
             setToggling(false);
         }
@@ -191,6 +201,12 @@ export default function ZeroLossPage() {
     const lastUpdateStr = lastUpdate
         ? new Date(lastUpdate).toLocaleTimeString('en-IN', { hour12: false })
         : null;
+    const liveClockStr = new Date(nowMs).toLocaleTimeString('en-IN', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
 
     if (loading) {
         return (
@@ -226,11 +242,12 @@ export default function ZeroLossPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {lastUpdateStr && (
-                        <span className="text-[10px] text-gray-600 font-price tabular-nums flex items-center gap-1">
-                            <Clock className="w-3 h-3" /> {lastUpdateStr}
-                        </span>
-                    )}
+                    <span
+                        className="text-[10px] text-gray-600 font-price tabular-nums flex items-center gap-1"
+                        title={lastUpdateStr ? `Last sync ${lastUpdateStr}` : undefined}
+                    >
+                        <Clock className="w-3 h-3" /> {liveClockStr}
+                    </span>
                     <button onClick={fetchAll}
                         className="p-2 rounded-lg border border-edge/10 bg-surface-800/60 text-gray-400 hover:text-heading hover:border-edge/20 transition-all"
                         title="Refresh">
