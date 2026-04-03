@@ -75,15 +75,6 @@ async def get_quote(
             quote_cache.set(cache_key, yf_quote, ttl=5)
             return yf_quote
 
-    # 4. Final demo fallback: synthetic quote so simulation mode never appears broken
-    if settings.SIMULATION_MODE and not _strict_zebu_only():
-        sim_quote = market_data.get_simulated_stock_quote(symbol)
-        if sim_quote:
-            normalized = market_data._normalize_quote(sim_quote)
-            if normalized:
-                quote_cache.set(cache_key, normalized, ttl=5)
-                return normalized
-
     raise HTTPException(status_code=404, detail="Symbol not found or data unavailable")
 
 

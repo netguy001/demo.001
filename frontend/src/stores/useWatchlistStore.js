@@ -16,6 +16,7 @@ const LEGACY_DEFAULT_WATCHLIST_NAMES = new Set([
 ]);
 
 const normalizeWatchlistName = (name = '') => String(name || '').trim().toLowerCase();
+const DEFAULT_INDEX_WATCHLIST_NAMES = new Set(['nifty 50', 'banknifty', 'sensex']);
 
 const isLegacyDefaultWatchlist = (watchlist) => LEGACY_DEFAULT_WATCHLIST_NAMES.has(normalizeWatchlistName(watchlist?.name));
 
@@ -87,12 +88,31 @@ const normalizeWatchlistItems = (items = []) =>
     });
 
 const normalizeWatchlists = (watchlists = []) =>
-    sanitizeWatchlists(watchlists || []).map((watchlist) => ({
-        ...watchlist,
-        items: normalizeWatchlistItems(watchlist?.items || []),
-    }));
+    sanitizeWatchlists(watchlists || []).map((watchlist) => {
+        const normalizedName = normalizeWatchlistName(watchlist?.name);
+        const isDefaultIndexList = DEFAULT_INDEX_WATCHLIST_NAMES.has(normalizedName);
+
+        const normalizedItems = normalizeWatchlistItems(watchlist?.items || []).map((item) => {
+            if (!isDefaultIndexList) return item;
+
+            const base = stripExchangeSuffix(item?.symbol || '');
+            const symbol = ensureNsSuffix(base);
+            return {
+                ...item,
+                symbol: symbol || String(item?.symbol || '').toUpperCase(),
+                exchange: 'NSE',
+            };
+        });
+
+        return {
+            ...watchlist,
+            items: normalizedItems,
+        };
+    });
 
 const BATCH_CHUNK_SIZE = 20;
+const QUOTE_FALLBACK_CHUNK_SIZE = 8;
+const MAX_QUOTE_FALLBACK_SYMBOLS = 48;
 
 const toIndexWatchlistId = (indexKey = '') => {
     const safe = String(indexKey || '')
@@ -545,19 +565,22 @@ export const useWatchlistStore = create((set, get) => ({
 
         const batchFailed = successfulChunks === 0;
 
-        // Only do per-symbol fallback if batch SUCCEEDED but some symbols were missing
-        // (NOT when batch failed entirely — that would just create more 429 errors)
-        if (!batchFailed && !isRateLimited()) {
+        // Per-symbol fallback for unresolved symbols.
+        // Applies both when batch partially succeeds and when all chunks fail,
+        // so rows don't stay blank until user clicks each symbol.
+        if (!isRateLimited()) {
             const missingSymbols = symbolList.filter((sym) => {
                 const withNs = ensureNsSuffix(sym);
                 const withoutNs = stripExchangeSuffix(sym);
                 return !(normalizedQuotes[withNs] || normalizedQuotes[withoutNs]);
             });
 
-            if (missingSymbols.length > 0 && missingSymbols.length <= 10) {
-                // Fallback only for a bounded subset to avoid request storms.
+            const fallbackTargets = missingSymbols.slice(0, MAX_QUOTE_FALLBACK_SYMBOLS);
+            for (let i = 0; i < fallbackTargets.length; i += QUOTE_FALLBACK_CHUNK_SIZE) {
+                if (isRateLimited()) break;
+                const chunk = fallbackTargets.slice(i, i + QUOTE_FALLBACK_CHUNK_SIZE);
                 const quoteResults = await Promise.allSettled(
-                    missingSymbols.map((sym) =>
+                    chunk.map((sym) =>
                         api.get(`/market/quote/${encodeURIComponent(sym)}`)
                             .then((res) => ({ symbol: sym, quote: res.data }))
                     )
@@ -569,6 +592,12 @@ export const useWatchlistStore = create((set, get) => ({
                         upsertQuote(symbol, quote);
                     }
                 });
+            }
+
+            // If batch failed and fallback still couldn't resolve anything,
+            // keep existing prices untouched to avoid wiping known good values.
+            if (batchFailed && Object.keys(normalizedQuotes).length === 0) {
+                return;
             }
         }
 
