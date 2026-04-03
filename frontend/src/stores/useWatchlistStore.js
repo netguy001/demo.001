@@ -102,7 +102,6 @@ const toIndexWatchlistId = (indexKey = '') => {
 };
 
 const normalizeQuote = (quote = {}) => {
-    const now = Date.now();
     const prevClose = toNumberOrNull(
         quote.prev_close ?? quote.prevClose ?? quote.close ?? quote.pc
     );
@@ -129,7 +128,6 @@ const normalizeQuote = (quote = {}) => {
         change: change ?? null,
         change_percent: changePercent ?? null,
         prev_close: prevClose ?? quote.prev_close ?? quote.close ?? 0,
-        _updatedAt: toNumberOrNull(quote._updatedAt) ?? now,
     };
 };
 
@@ -591,16 +589,8 @@ export const useWatchlistStore = create((set, get) => ({
     updatePrices: (quotesMap) =>
         set((s) => {
             if (!quotesMap || Object.keys(quotesMap).length === 0) return s;
-            const normalizedMap = {};
-            const now = Date.now();
-            for (const [key, quote] of Object.entries(quotesMap)) {
-                normalizedMap[key] = {
-                    ...(quote || {}),
-                    _updatedAt: toNumberOrNull(quote?._updatedAt) ?? now,
-                };
-            }
             let hasChanges = false;
-            for (const [key, quote] of Object.entries(normalizedMap)) {
+            for (const [key, quote] of Object.entries(quotesMap)) {
                 const old = s.prices[key];
                 if (!old || old.price !== quote.price || old.change !== quote.change) {
                     hasChanges = true;
@@ -608,6 +598,6 @@ export const useWatchlistStore = create((set, get) => ({
                 }
             }
             if (!hasChanges) return s;
-            return { prices: { ...s.prices, ...normalizedMap } };
+            return { prices: { ...s.prices, ...quotesMap } };
         }),
 }));
