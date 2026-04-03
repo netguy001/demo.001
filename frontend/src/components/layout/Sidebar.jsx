@@ -107,7 +107,7 @@ function SidebarItem({ to, icon: Icon, label, collapsed }) {
       aria-label={label}
       className={({ isActive }) =>
         cn(
-          "relative flex items-center h-10 rounded-lg transition-all duration-150 ease-out",
+          "relative flex items-center h-10 rounded-lg transition-colors duration-150 ease-out",
           "text-[13px] font-medium",
           collapsed
             ? "justify-center w-10 mx-auto"
@@ -256,7 +256,7 @@ export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeav
                 role={collapsed ? 'button' : undefined}
                 tabIndex={collapsed ? 0 : undefined}
                 className={cn(
-                  "flex items-center rounded-lg mb-1 transition-all duration-200",
+                  "flex items-center rounded-lg mb-1 transition-colors duration-200",
                   collapsed
                     ? "justify-center py-1.5 mx-auto w-10 cursor-pointer hover:bg-overlay/[0.05]"
                     : "gap-2.5 px-3 py-2.5 hover:bg-overlay/[0.03]",
@@ -295,7 +295,7 @@ export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeav
             title={collapsed ? "Settings" : undefined}
             className={({ isActive }) =>
               cn(
-                "flex items-center h-10 rounded-lg transition-all duration-150 font-medium",
+                "flex items-center h-10 rounded-lg transition-colors duration-150 font-medium",
                 collapsed ? "justify-center w-10 mx-auto" : "gap-3 px-3 w-full",
                 isActive
                   ? "text-primary-600 bg-primary-500/[0.08]"
@@ -319,7 +319,7 @@ export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeav
             onClick={handleLogout}
             title={collapsed ? "Log Out" : undefined}
             className={cn(
-              "flex items-center h-10 rounded-md transition-all duration-200",
+                "flex items-center h-10 rounded-md transition-colors duration-200",
               "text-slate-500 dark:text-slate-400 hover:text-red-500 hover:bg-red-500/[0.06]",
               collapsed ? "justify-center w-10 mx-auto" : "gap-3 px-3 w-full",
             )}
