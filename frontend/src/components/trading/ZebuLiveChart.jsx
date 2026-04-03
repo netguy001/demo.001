@@ -857,7 +857,7 @@ const ZebuLiveChart = memo(function ZebuLiveChart({
             axisLabelVisible: false,
             title: '',
         });
-    }, [liveQuote]);
+    }, [liveQuote, candles]);
 
     // ── Indicator overlays ────────────────────────────────────────
     useEffect(() => {
