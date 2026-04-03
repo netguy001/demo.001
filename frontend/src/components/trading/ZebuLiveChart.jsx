@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { createChart, CrosshairMode } from 'lightweight-charts';
+import api from '../../services/api';
 
 // IST offset: lightweight-charts displays Unix timestamps as UTC,
 // so we shift by +5:30 (19800s) to show Indian Standard Time.
@@ -457,6 +458,7 @@ const ZebuLiveChart = memo(function ZebuLiveChart({
     const [activeTool, setActiveTool] = useState(null);
     const [hLines, setHLines] = useState([]);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [canMutateLiveCandle, setCanMutateLiveCandle] = useState(true);
     const menuRef = useRef(null);
     const indicatorMenuRef = useRef(null);
     const toolsMenuRef = useRef(null);
@@ -476,6 +478,28 @@ const ZebuLiveChart = memo(function ZebuLiveChart({
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, [showIndicatorMenu, showToolsMenu, showPeriodMenu]);
+
+    // ── Market session guard ────────────────────────────────────────────────
+    useEffect(() => {
+        let mounted = true;
+
+        const fetchSession = async () => {
+            try {
+                const res = await api.get('/market/session');
+                if (!mounted) return;
+                setCanMutateLiveCandle(!!res.data?.can_place_orders);
+            } catch {
+                // Keep existing behavior on transient failures.
+            }
+        };
+
+        fetchSession();
+        const interval = setInterval(fetchSession, 60_000);
+        return () => {
+            mounted = false;
+            clearInterval(interval);
+        };
+    }, []);
 
     // ── Indicator toggle ──────────────────────────────────────────
     const toggleIndicator = useCallback((id) => {
@@ -810,7 +834,7 @@ const ZebuLiveChart = memo(function ZebuLiveChart({
     useEffect(() => {
         const cs = candleSeriesRef.current;
         const vs = volumeSeriesRef.current;
-        if (!cs || !vs || !liveQuote?.price || candlesRef.current.length === 0) return;
+        if (!canMutateLiveCandle || !cs || !vs || !liveQuote?.price || candlesRef.current.length === 0) return;
 
         const ltp = toFiniteNumber(liveQuote.price);
         if (ltp == null) return;
@@ -857,7 +881,7 @@ const ZebuLiveChart = memo(function ZebuLiveChart({
             axisLabelVisible: false,
             title: '',
         });
-    }, [liveQuote, candles]);
+    }, [liveQuote, candles, canMutateLiveCandle]);
 
     // ── Indicator overlays ────────────────────────────────────────
     useEffect(() => {
