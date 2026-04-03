@@ -163,15 +163,15 @@ export default function CommoditiesPage() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 lg:w-[360px]">
-                    <div className="rounded-lg border border-edge/10 bg-surface-900/60 px-3 py-2">
+                    <div className="rounded-lg bg-surface-900/60 px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500">Up</div>
                         <div className="text-sm font-price tabular-nums text-profit font-semibold">{stats.up}</div>
                     </div>
-                    <div className="rounded-lg border border-edge/10 bg-surface-900/60 px-3 py-2">
+                    <div className="rounded-lg bg-surface-900/60 px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500">Down</div>
                         <div className="text-sm font-price tabular-nums text-loss font-semibold">{stats.down}</div>
                     </div>
-                    <div className="rounded-lg border border-edge/10 bg-surface-900/60 px-3 py-2">
+                    <div className="rounded-lg bg-surface-900/60 px-3 py-2">
                         <div className="text-[10px] uppercase tracking-wider text-gray-500">Flat</div>
                         <div className="text-sm font-price tabular-nums text-heading font-semibold">{stats.flat}</div>
                     </div>
@@ -180,7 +180,7 @@ export default function CommoditiesPage() {
 
             {/* ── Category tabs + Search ────────────────────────── */}
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex gap-1.5 bg-surface-900/50 rounded-xl p-1 border border-edge/8">
+                <div className="flex gap-1.5 bg-surface-900/50 rounded-xl p-1">
                     {Object.entries(CATEGORY_CONFIG).map(([key, cfg]) => (
                         <button
                             key={key}
@@ -204,7 +204,7 @@ export default function CommoditiesPage() {
                         placeholder="Search commodities..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-edge/10 bg-surface-900/60 text-heading placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-primary-500/30"
+                        className="w-full pl-9 pr-3 py-2 text-sm rounded-lg bg-surface-900/60 text-heading placeholder:text-gray-600 focus:outline-none focus:ring-1 focus:ring-primary-500/30"
                     />
                 </div>
             </div>
@@ -216,11 +216,11 @@ export default function CommoditiesPage() {
                 </div>
             ) : filtered.length > 0 ? (
                 <>
-                    <div className="rounded-xl border border-edge/8 bg-surface-900/55 overflow-hidden">
+                    <div className="rounded-xl bg-surface-900/55 overflow-hidden">
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                    <tr className="border-b border-edge/10 bg-surface-800/40">
+                                    <tr className="bg-surface-800/40">
                                         <th className="text-left px-4 py-3 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Symbol</th>
                                         <th className="text-right px-3 py-3 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">LTP</th>
                                         <th className="text-right px-3 py-3 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Change</th>
@@ -234,7 +234,7 @@ export default function CommoditiesPage() {
                                         <th className="text-center px-3 py-3 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Trade</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-edge/6">
+                                <tbody>
                                     {filtered.map((c) => {
                                         const flash = getFlash(c.symbol);
                                         const chg = c.change ?? 0;
@@ -346,11 +346,11 @@ export default function CommoditiesPage() {
                     {(gainers.length > 0 || losers.length > 0) && (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {gainers.length > 0 && (
-                                <div className="rounded-xl border border-edge/8 bg-surface-900/55 p-4">
+                                <div className="rounded-xl bg-surface-900/55 p-4">
                                     <h2 className="section-title text-sm text-heading flex items-center gap-2 mb-3">
                                         <TrendingUp className="w-4.5 h-4.5 text-emerald-500" /> Gainers
                                     </h2>
-                                    <div className="divide-y divide-edge/8">
+                                    <div>
                                         {gainers.map((c, i) => (
                                             <div
                                                 key={c.symbol}
@@ -374,11 +374,11 @@ export default function CommoditiesPage() {
                                 </div>
                             )}
                             {losers.length > 0 && (
-                                <div className="rounded-xl border border-edge/8 bg-surface-900/55 p-4">
+                                <div className="rounded-xl bg-surface-900/55 p-4">
                                     <h2 className="section-title text-sm text-heading flex items-center gap-2 mb-3">
                                         <TrendingDown className="w-4.5 h-4.5 text-red-500" /> Losers
                                     </h2>
-                                    <div className="divide-y divide-edge/8">
+                                    <div>
                                         {losers.map((c, i) => (
                                             <div
                                                 key={c.symbol}
@@ -405,7 +405,7 @@ export default function CommoditiesPage() {
                     )}
                 </>
             ) : (
-                <div className="rounded-xl border border-edge/8 bg-surface-900/55 p-12 text-center">
+                <div className="rounded-xl bg-surface-900/55 p-12 text-center">
                     <Gem className="w-12 h-12 mx-auto mb-3 text-gray-600 opacity-40" />
                     <p className="text-sm font-medium text-gray-500">No commodities found</p>
                 </div>

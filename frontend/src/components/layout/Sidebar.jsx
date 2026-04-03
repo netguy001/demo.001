@@ -272,9 +272,14 @@ export default function Sidebar({ collapsed, onToggle }) {
                 <UserAvatar user={user} size={8} />
                 {!collapsed && (
                   <div className="min-w-0">
-                    <p className="text-[13px] font-medium text-heading truncate leading-tight">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/settings?tab=profile')}
+                      className="text-[13px] font-medium text-heading truncate leading-tight hover:text-primary-600 transition-colors cursor-pointer text-left w-full"
+                      title="Open profile settings"
+                    >
                       {user.full_name || user.username}
-                    </p>
+                    </button>
                     <a
                       href={`mailto:${user.email}`}
                       className="text-[11px] text-gray-500 truncate leading-tight mt-0.5 hover:text-primary-600 transition-colors cursor-pointer"
