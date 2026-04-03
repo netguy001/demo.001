@@ -10,6 +10,7 @@ import {
     ShieldCheck,
 } from 'lucide-react';
 import { formatCurrency, formatPrice, formatPercent, pnlColorClass, cleanSymbol } from '../utils/formatters';
+import { buildPortfolioMetrics } from '../utils/portfolioMetrics';
 import { Skeleton } from '../components/ui';
 import { cn } from '../utils/cn';
 
@@ -72,45 +73,13 @@ export default function DashboardPage() {
         load();
     }, []);
 
-    // Compute live holdings with real-time P&L from WebSocket quotes
-    const liveHoldings = useMemo(() => {
-        const baseHoldings = storeHoldings?.length > 0 ? storeHoldings : holdings;
-        return baseHoldings.map((h) => {
-            const symbol = h?.symbol;
-            if (!symbol) return h;
-            const wsQuote = liveQuotes[symbol] || liveQuotes[symbol.replace('.NS', '')] || liveQuotes[`${symbol}.NS`];
-            const livePrice = Number(wsQuote?.price ?? wsQuote?.lp ?? wsQuote?.ltp ?? wsQuote?.last_price);
-            if (!Number.isFinite(livePrice) || livePrice <= 0) return h;
-            const quantity = Number(h.quantity ?? 0);
-            const avgPrice = Number(h.avg_price ?? 0);
-            const investedValue = avgPrice * quantity;
-            const currentValue = livePrice * quantity;
-            const pnl = currentValue - investedValue;
-            const pnlPercent = investedValue > 0 ? (pnl / investedValue) * 100 : 0;
-            return { ...h, current_price: livePrice, current_value: currentValue, pnl, pnl_percent: pnlPercent };
-        });
-    }, [storeHoldings, holdings, liveQuotes]);
-
-    // Compute live totals from holdings with real-time prices
-    const liveTotals = useMemo(() => {
-        const invested = liveHoldings.reduce((sum, h) => {
-            const qty = Number(h.quantity ?? 0);
-            const avg = Number(h.avg_price ?? 0);
-            return sum + Math.abs(avg * qty);
-        }, 0);
-        const current = liveHoldings.reduce((sum, h) => sum + Math.abs(Number(h.current_value ?? 0)), 0);
-        const unrealized = liveHoldings.reduce((sum, h) => sum + Number(h.pnl ?? 0), 0);
-        return { invested, current, unrealized };
-    }, [liveHoldings]);
-
-    const pickNumber = (...values) => {
-        for (const value of values) {
-            if (value == null) continue;
-            const n = Number(value);
-            if (Number.isFinite(n)) return n;
-        }
-        return 0;
-    };
+    const metrics = useMemo(() => buildPortfolioMetrics({
+        summary: storeSummary,
+        pnl: storePnl,
+        holdings: storeHoldings?.length > 0 ? storeHoldings : holdings,
+        liveQuotes,
+        portfolio,
+    }), [storeSummary, storePnl, storeHoldings, holdings, liveQuotes, portfolio]);
 
     if (loading) {
         return (
@@ -130,20 +99,14 @@ export default function DashboardPage() {
         );
     }
 
-    // Prefer real-time computed values, fallback to store summary, then static API data
-    const hasLiveHoldings = liveHoldings.length > 0;
-    const totalInvested = hasLiveHoldings
-        ? pickNumber(liveTotals.invested)
-        : pickNumber(storeSummary?.total_invested, portfolio?.total_invested);
-    const currentValue = hasLiveHoldings
-        ? pickNumber(liveTotals.current)
-        : pickNumber(storeSummary?.current_value, portfolio?.current_value);
-    const availableCash = pickNumber(storeSummary?.available_capital, portfolio?.available_capital);
-    const totalCapital = pickNumber(storeSummary?.net_equity, portfolio?.net_equity, availableCash + currentValue);
-    const totalPnl = hasLiveHoldings
-        ? pickNumber(storePnl?.total, storeSummary?.total_pnl, portfolio?.total_pnl, liveTotals.unrealized)
-        : pickNumber(storePnl?.total, storeSummary?.total_pnl, portfolio?.total_pnl);
-    const totalPnlPct = Math.abs(totalInvested) > 0 ? (totalPnl / Math.abs(totalInvested)) * 100 : 0;
+    const {
+        totalInvested,
+        currentValue,
+        availableCash,
+        totalCapital,
+        totalPnl,
+        totalPnlPct,
+    } = metrics;
 
     return (
         <div className="p-4 lg:p-6 space-y-5 animate-fade-in">

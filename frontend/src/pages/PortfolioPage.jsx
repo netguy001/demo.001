@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { cleanSymbol, formatCurrency, formatPercent, pnlColorClass } from '../utils/formatters';
+import { buildPortfolioMetrics } from '../utils/portfolioMetrics';
 
 function MetricCard({ label, value, delta, icon: Icon, emphasize = false }) {
     const numeric = Number(value ?? 0);
@@ -68,58 +69,39 @@ export default function PortfolioPage() {
         refreshPortfolio();
     }, [refreshPortfolio]);
 
-    const liveHoldings = useMemo(() => {
-        return (holdings || []).map((holding) => {
-            const symbol = holding?.symbol;
-            if (!symbol) return holding;
+    const metrics = useMemo(() => buildPortfolioMetrics({
+        summary,
+        pnl,
+        holdings,
+        liveQuotes,
+    }), [summary, pnl, holdings, liveQuotes]);
 
-            const quote = liveQuotes[symbol] || liveQuotes[symbol.replace('.NS', '')] || liveQuotes[`${symbol}.NS`];
-            const livePrice = Number(quote?.price ?? quote?.lp ?? quote?.ltp ?? quote?.last_price);
-            if (!Number.isFinite(livePrice) || livePrice <= 0) return holding;
-
-            const quantity = Number(holding.quantity ?? 0);
-            const avgPrice = Number(holding.avg_price ?? 0);
-            const investedValue = avgPrice * quantity;
-            const currentValue = livePrice * quantity;
-            const unrealizedPnl = currentValue - investedValue;
-            const unrealizedPnlPct = Math.abs(investedValue) > 0 ? (unrealizedPnl / Math.abs(investedValue)) * 100 : 0;
-
-            return {
-                ...holding,
-                current_price: livePrice,
-                current_value: currentValue,
-                invested_value: investedValue,
-                pnl: unrealizedPnl,
-                pnl_percent: unrealizedPnlPct,
-            };
-        });
-    }, [holdings, liveQuotes]);
+    const { liveHoldings } = metrics;
 
     const analytics = useMemo(() => {
-        const totalInvested = liveHoldings.reduce((sum, h) => {
-            const fallback = Number(h.avg_price ?? 0) * Number(h.quantity ?? 0);
-            return sum + Math.abs(Number(h.invested_value ?? fallback));
-        }, 0);
-        const currentValue = liveHoldings.reduce((sum, h) => sum + Math.abs(Number(h.current_value ?? 0)), 0);
-        const liveM2M = liveHoldings.reduce((sum, h) => sum + Number(h.pnl ?? 0), 0);
-        const realized = Number(summary?.realized_pnl ?? pnl?.realized ?? 0);
-        const unrealized = Number(summary?.unrealized_pnl ?? pnl?.unrealized ?? liveM2M ?? 0);
-        const totalPnl = Number(summary?.total_pnl ?? pnl?.total ?? (realized + unrealized));
-        const availableCash = Number(summary?.available_capital ?? 0);
-        const totalCapital = Number(summary?.net_equity ?? (availableCash + currentValue));
-        const pnlPct = Math.abs(totalInvested) > 0 ? (totalPnl / Math.abs(totalInvested)) * 100 : 0;
-        const m2mPct = Math.abs(totalInvested) > 0 ? (liveM2M / Math.abs(totalInvested)) * 100 : 0;
+        const {
+            totalInvested,
+            currentValue,
+            liveTotals,
+            realized,
+            unrealized,
+            totalPnl,
+            availableCash,
+            totalCapital,
+            totalPnlPct: pnlPct,
+            m2mPct,
+            investedPct,
+            cashPct,
+        } = metrics;
         const winners = liveHoldings.filter((h) => Number(h.pnl ?? 0) > 0).length;
         const losers = liveHoldings.filter((h) => Number(h.pnl ?? 0) < 0).length;
         const winRate = winners + losers > 0 ? (winners / (winners + losers)) * 100 : 0;
         const grossExposure = liveHoldings.reduce((sum, h) => sum + Math.abs(Number(h.current_value ?? 0)), 0);
-        const allocationBase = totalInvested + Math.max(availableCash, 0);
-        const cashRatio = allocationBase > 0 ? (Math.max(availableCash, 0) / allocationBase) * 100 : 0;
 
         return {
             totalInvested,
             currentValue,
-            liveM2M,
+            liveM2M: liveTotals.unrealized,
             realized,
             unrealized,
             totalPnl,
@@ -131,10 +113,11 @@ export default function PortfolioPage() {
             losers,
             winRate,
             grossExposure,
-            cashRatio,
-            allocationBase,
+            cashRatio: cashPct,
+            allocationBase: totalCapital,
+            investedPct,
         };
-    }, [liveHoldings, pnl, summary]);
+    }, [metrics, liveHoldings]);
 
     const recentTrades = useMemo(() => {
         const toEpoch = (order) => {

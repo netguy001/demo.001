@@ -1,4 +1,5 @@
 import { formatCurrency } from '../../utils/formatters';
+import { buildPortfolioMetrics } from '../../utils/portfolioMetrics';
 import PnLCard from './PnLCard';
 import Skeleton from '../ui/Skeleton';
 
@@ -8,13 +9,8 @@ import Skeleton from '../ui/Skeleton';
  * @param {{ summary: object|null, isLoading: boolean }} props
  */
 export default function PortfolioSummary({ summary, isLoading }) {
-    const availableCash = summary?.available_capital ?? 0;
-    const currentValue = summary?.current_value ?? 0;
-    const totalInvested = summary?.total_invested ?? 0;
-    const totalPnl = summary?.total_pnl ?? 0;
-    const totalPnlPct = summary?.total_pnl_percent ?? 0;
-    const totalCapital = summary?.net_equity ?? (availableCash + currentValue);
-    const investedPct = totalCapital > 0 ? (Math.abs(totalInvested) / totalCapital) * 100 : 0;
+    const metrics = buildPortfolioMetrics({ summary });
+    const { availableCash, currentValue, totalInvested, totalPnl, totalPnlPct, totalCapital, investedPct } = metrics;
 
     if (isLoading) {
         return (

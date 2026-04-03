@@ -12,6 +12,7 @@ import {
     ShieldCheck, ClipboardList, Globe, Landmark,
 } from 'lucide-react';
 import { formatCurrency, formatPrice, formatPercent, pnlColorClass, cleanSymbol } from '../utils/formatters';
+import { buildPortfolioMetrics } from '../utils/portfolioMetrics';
 import { Skeleton } from '../components/ui';
 import { cn } from '../utils/cn';
 
@@ -76,49 +77,22 @@ export default function DashboardWorkspace() {
         return () => stopPolling();
     }, [fetchIndices, startPolling, stopPolling]);
 
-    const liveHoldings = useMemo(() => {
-        return (holdings || []).map((holding) => {
-            const symbol = holding?.symbol;
-            if (!symbol) return holding;
+    const metrics = useMemo(() => buildPortfolioMetrics({
+        summary: portfolio,
+        pnl,
+        holdings,
+        liveQuotes,
+    }), [portfolio, pnl, holdings, liveQuotes]);
 
-            const wsQuote = liveQuotes[symbol] || liveQuotes[symbol.replace('.NS', '')] || liveQuotes[`${symbol}.NS`];
-            const livePrice = Number(wsQuote?.price ?? wsQuote?.lp ?? wsQuote?.ltp ?? wsQuote?.last_price);
-            if (!Number.isFinite(livePrice) || livePrice <= 0) return holding;
-
-            const quantity = Number(holding.quantity ?? 0);
-            const avgPrice = Number(holding.avg_price ?? 0);
-            const investedValue = avgPrice * quantity;
-            const currentValue = livePrice * quantity;
-            const unrealizedPnl = currentValue - investedValue;
-            const unrealizedPct = investedValue > 0 ? (unrealizedPnl / investedValue) * 100 : 0;
-
-            return {
-                ...holding,
-                current_price: livePrice,
-                current_value: currentValue,
-                pnl: unrealizedPnl,
-                pnl_percent: unrealizedPct,
-            };
-        });
-    }, [holdings, liveQuotes]);
-
-    const liveTotals = useMemo(() => {
-        const invested = liveHoldings.reduce((sum, holding) => {
-            const qty = Number(holding.quantity ?? 0);
-            const avg = Number(holding.avg_price ?? 0);
-            return sum + avg * qty;
-        }, 0);
-        const current = liveHoldings.reduce((sum, holding) => sum + Number(holding.current_value ?? 0), 0);
-        const unrealized = liveHoldings.reduce((sum, holding) => sum + Number(holding.pnl ?? 0), 0);
-        return { invested, current, unrealized };
-    }, [liveHoldings]);
-
-    const totalInvested = liveTotals.invested || Number(portfolio?.total_invested ?? 0);
-    const currentValue = liveTotals.current || Number(portfolio?.current_value ?? 0);
-    const availableCash = Number(portfolio?.available_capital ?? 0);
-    const totalCapital = availableCash + currentValue;
-    const totalPnl = liveTotals.unrealized || Number(pnl?.total ?? portfolio?.total_pnl ?? 0);
-    const totalPnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
+    const {
+        liveHoldings,
+        totalInvested,
+        currentValue,
+        availableCash,
+        totalCapital,
+        totalPnl,
+        totalPnlPct,
+    } = metrics;
 
     const topHoldings = liveHoldings.slice(0, 5);
     const recentOrders = (orders || []).slice(0, 5);

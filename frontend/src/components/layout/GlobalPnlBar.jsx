@@ -3,24 +3,13 @@ import { TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { cn } from '../../utils/cn';
 import { formatCurrency, formatPercent, pnlColorClass } from '../../utils/formatters';
+import { buildPortfolioMetrics } from '../../utils/portfolioMetrics';
 
 export default function GlobalPnlBar() {
     const summary = usePortfolioStore((s) => s.summary);
     const pnl = usePortfolioStore((s) => s.pnl);
 
-    const metrics = useMemo(() => {
-        const totalPnl = Number(summary?.total_pnl ?? pnl?.total ?? 0);
-        const totalPnlPct = Number(summary?.total_pnl_percent ?? 0);
-        // Derive net_equity from available_capital + current_value when the field is absent/zero
-        const netEquity = Number(
-            summary?.net_equity ||
-            (summary?.available_capital != null
-                ? Number(summary.available_capital) + Number(summary.current_value ?? 0)
-                : 0)
-        );
-        const unrealized = Number(summary?.unrealized_pnl ?? pnl?.unrealized ?? 0);
-        return { totalPnl, totalPnlPct, netEquity, unrealized };
-    }, [summary, pnl]);
+    const metrics = useMemo(() => buildPortfolioMetrics({ summary, pnl }), [summary, pnl]);
 
     const positive = metrics.totalPnl >= 0;
 
@@ -46,7 +35,7 @@ export default function GlobalPnlBar() {
                 </span>
                 <span className="text-gray-500 flex items-center gap-1">
                     <Wallet className="w-3 h-3" />
-                    Net Equity <span className="font-price tabular-nums text-heading">{formatCurrency(metrics.netEquity)}</span>
+                    Net Equity <span className="font-price tabular-nums text-heading">{formatCurrency(metrics.totalCapital)}</span>
                 </span>
             </div>
         </div>
