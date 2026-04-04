@@ -130,9 +130,9 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="metric-label block mb-1">Symbol</label>
-                        <div className="h-11 bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm font-semibold text-heading flex items-center justify-between">
-                            <span>{cleanSymbol(symbol)}</span>
-                            <span className="text-xs text-gray-500 font-price tabular-nums">
+                        <div className="h-11 bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm font-semibold text-heading flex items-center justify-between gap-1.5">
+                            <span className="min-w-0 truncate">{cleanSymbol(symbol)}</span>
+                            <span className="text-[11px] text-gray-500 font-price tabular-nums flex-shrink-0">
                                 {currentPrice > 0 ? `₹${formatPrice(currentPrice)}` : ''}
                             </span>
                         </div>

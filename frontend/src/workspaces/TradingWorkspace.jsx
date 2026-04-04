@@ -34,7 +34,7 @@ export default function TradingWorkspace() {
     const EXPANDED_MIN_HEIGHT = 120;
     const MAX_BOTTOM_HEIGHT = 420;
     const DEFAULT_BOTTOM_HEIGHT = 200;
-    const ORDER_FLOAT_WIDTH = 360;
+    const ORDER_FLOAT_WIDTH = 312;
 
     const [searchParams] = useSearchParams();
     const initialSymbol = searchParams.get('symbol') || 'RELIANCE.NS';
@@ -497,7 +497,7 @@ export default function TradingWorkspace() {
                             left: orderPanelPos.x,
                             top: orderPanelPos.y,
                             width: ORDER_FLOAT_WIDTH,
-                            height: 'min(calc(100vh - 140px), 620px)',
+                            maxHeight: 'calc(100vh - 140px)',
                             backdropFilter: 'blur(24px)',
                         }}
                     >
@@ -518,7 +518,7 @@ export default function TradingWorkspace() {
                                 </svg>
                             </button>
                         </div>
-                        <div className="min-h-0 flex-1 overflow-hidden">
+                        <div className="overflow-hidden">
                             {orderPanelEl}
                         </div>
                     </div>
