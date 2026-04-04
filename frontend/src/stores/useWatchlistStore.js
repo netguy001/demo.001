@@ -112,7 +112,12 @@ const normalizeWatchlists = (watchlists = []) =>
 
 const BATCH_CHUNK_SIZE = 20;
 const QUOTE_FALLBACK_CHUNK_SIZE = 8;
-const MAX_QUOTE_FALLBACK_SYMBOLS = 48;
+const MAX_QUOTE_FALLBACK_SYMBOLS = 120;
+const BATCH_RETRY_DELAY_MS = 180;
+
+let inflightFetchPricesPromise = null;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const toIndexWatchlistId = (indexKey = '') => {
     const safe = String(indexKey || '')
@@ -131,18 +136,10 @@ const normalizeQuote = (quote = {}) => {
         quote.price ?? quote.lp ?? quote.ltp ?? quote.last_price ?? quote.lastPrice
     );
 
-    let change = toNumberOrNull(quote.change ?? quote.net_change ?? quote.netChange);
-    let changePercent = toNumberOrNull(
+    const change = toNumberOrNull(quote.change ?? quote.net_change ?? quote.netChange);
+    const changePercent = toNumberOrNull(
         quote.change_percent ?? quote.changePercent ?? quote.pct_change ?? quote.pChange ?? quote.percent_change
     );
-
-    if (change == null && price != null && prevClose != null) {
-        change = price - prevClose;
-    }
-
-    if (changePercent == null && change != null && prevClose && prevClose !== 0) {
-        changePercent = (change / prevClose) * 100;
-    }
 
     return {
         ...quote,
@@ -495,6 +492,11 @@ export const useWatchlistStore = create((set, get) => ({
 
     // ── Fetch prices for active watchlist ─────────────────────────────────────
     fetchPrices: async () => {
+        if (inflightFetchPricesPromise) {
+            return inflightFetchPricesPromise;
+        }
+
+        inflightFetchPricesPromise = (async () => {
         // Skip if we're in a 429 cooldown period
         if (isRateLimited()) return;
 
@@ -555,27 +557,49 @@ export const useWatchlistStore = create((set, get) => ({
         }
 
         let successfulChunks = 0;
-        const batchResults = await Promise.allSettled(
-            chunks.map((chunk) =>
-                api.get(`/market/batch?symbols=${encodeURIComponent(chunk.join(','))}`)
-            )
-        );
 
-        batchResults.forEach((result) => {
-            if (result.status === 'fulfilled') {
+        for (let index = 0; index < chunks.length; index += 1) {
+            if (isRateLimited()) break;
+            const chunk = chunks[index];
+            try {
+                const res = await api.get(`/market/batch?symbols=${encodeURIComponent(chunk.join(','))}`);
                 successfulChunks += 1;
-                const quotes = result.value?.data?.quotes || {};
+                const quotes = res?.data?.quotes || {};
                 Object.entries(quotes).forEach(([key, value]) => upsertQuote(key, value));
-                return;
+            } catch (err) {
+                if (err?.message !== 'Rate limited — backing off') {
+                    console.warn('[Watchlist] Batch chunk fetch failed:', err?.message || err);
+                }
             }
 
-            const err = result.reason;
-            if (err?.message !== 'Rate limited — backing off') {
-                console.warn('[Watchlist] Batch chunk fetch failed:', err?.message || err);
+            if (index < chunks.length - 1) {
+                await sleep(BATCH_RETRY_DELAY_MS);
             }
-        });
+        }
 
         const batchFailed = successfulChunks === 0;
+
+        if (!isRateLimited()) {
+            const unresolvedSymbols = symbolList.filter((sym) => {
+                const withNs = ensureNsSuffix(sym);
+                const withoutNs = stripExchangeSuffix(sym);
+                return !(normalizedQuotes[withNs] || normalizedQuotes[withoutNs]);
+            });
+
+            for (let i = 0; i < unresolvedSymbols.length; i += BATCH_CHUNK_SIZE) {
+                if (isRateLimited()) break;
+                const chunk = unresolvedSymbols.slice(i, i + BATCH_CHUNK_SIZE);
+                if (chunk.length === 0) continue;
+                try {
+                    const retryRes = await api.get(`/market/batch?symbols=${encodeURIComponent(chunk.join(','))}`);
+                    const retryQuotes = retryRes?.data?.quotes || {};
+                    Object.entries(retryQuotes).forEach(([key, value]) => upsertQuote(key, value));
+                } catch {
+                    // Ignore and continue to per-symbol fallback for unresolved names.
+                }
+                await sleep(BATCH_RETRY_DELAY_MS);
+            }
+        }
 
         // Per-symbol fallback for unresolved symbols.
         // Applies both when batch partially succeeds and when all chunks fail,
@@ -642,6 +666,13 @@ export const useWatchlistStore = create((set, get) => ({
             if (!hasChanges) return s; // No change — skip re-render
             return { prices: { ...prev, ...normalizedQuotes } };
         });
+        })();
+
+        try {
+            await inflightFetchPricesPromise;
+        } finally {
+            inflightFetchPricesPromise = null;
+        }
     },
 
     updatePrices: (quotesMap) =>

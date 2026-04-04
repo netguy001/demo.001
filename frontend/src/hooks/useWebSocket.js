@@ -3,10 +3,8 @@ import { useMarketStore } from '../store/useMarketStore';
 import { usePortfolioStore } from '../store/usePortfolioStore';
 import { useWatchlistStore } from '../stores/useWatchlistStore';
 import { useZeroLossStore } from '../stores/useZeroLossStore';
-import api, { isRateLimited } from '../services/api';
+import api from '../services/api';
 import { WS_MAX_BACKOFF_MS, WS_HEARTBEAT_MS, normalizeSymbol } from '../utils/constants';
-
-const WS_FALLBACK_POLL_MS = 15_000;
 
 /**
  * WebSocket hook for real-time market data.
@@ -22,10 +20,10 @@ export function useWebSocket() {
     const failedAttemptsRef = useRef(0);
     const reconnectTimer = useRef(null);
     const heartbeatTimer = useRef(null);
-    const fallbackPollTimer = useRef(null);
     const messageQueue = useRef([]);
     const mountedRef = useRef(true);
     const portfolioRefreshTimer = useRef(null);
+    const isMarketTradingRef = useRef(true);
 
     // Store selectors — these are stable Zustand selectors
     const updateQuote = useMarketStore((s) => s.updateQuote);
@@ -45,6 +43,27 @@ export function useWebSocket() {
         updateQuote, setWsStatus, applyLiveQuote,
         refreshPortfolio, handleZeroLoss, updateWatchlistPrices,
     };
+
+    useEffect(() => {
+        let alive = true;
+
+        const refreshMarketSession = async () => {
+            try {
+                const res = await api.get('/health');
+                const isTrading = Boolean(res?.data?.market_session?.is_trading);
+                if (alive) isMarketTradingRef.current = isTrading;
+            } catch {
+                // Keep prior value on transient failures.
+            }
+        };
+
+        refreshMarketSession();
+        const id = setInterval(refreshMarketSession, 60_000);
+        return () => {
+            alive = false;
+            clearInterval(id);
+        };
+    }, []);
 
     const trackedRef = useRef([]);
     // Update tracked symbols whenever dependencies change
@@ -67,6 +86,7 @@ export function useWebSocket() {
 
     const applyIncomingQuote = useCallback((symbol, data = {}) => {
         if (!symbol) return;
+        if (!isMarketTradingRef.current) return;
         const normalizedSymbol = normalizeSymbol(symbol);
         const resolvedPrice = Number(data.price ?? data.lp ?? data.ltp ?? data.last_price);
 
@@ -105,35 +125,6 @@ export function useWebSocket() {
         }
     }, []);
 
-    const pollQuotesFallback = useCallback(async () => {
-        if (isRateLimited()) return;
-        const symbols = trackedRef.current;
-        if (symbols.length === 0) return;
-
-        try {
-            const res = await api.get(`/market/batch?symbols=${encodeURIComponent(symbols.join(','))}`);
-            const quotes = res.data?.quotes || {};
-            Object.entries(quotes).forEach(([symbol, quote]) => {
-                applyIncomingQuote(symbol, quote || {});
-            });
-        } catch {
-            // Ignore fallback polling errors
-        }
-    }, [applyIncomingQuote]);
-
-    const stopFallbackPolling = useCallback(() => {
-        if (fallbackPollTimer.current) {
-            clearInterval(fallbackPollTimer.current);
-            fallbackPollTimer.current = null;
-        }
-    }, []);
-
-    const ensureFallbackPolling = useCallback(() => {
-        if (fallbackPollTimer.current) return;
-        pollQuotesFallback(); // Immediate first poll
-        fallbackPollTimer.current = setInterval(pollQuotesFallback, WS_FALLBACK_POLL_MS);
-    }, [pollQuotesFallback]);
-
     // ── Connect — stable function, no recreations ──────────────────────────
     const connectRef = useRef(null);
     connectRef.current = () => {
@@ -169,8 +160,6 @@ export function useWebSocket() {
                     wsRef.current.send(JSON.stringify({ type: 'ping' }));
                 }
             }, WS_HEARTBEAT_MS);
-
-            stopFallbackPolling();
 
             // Flush queued messages
             while (messageQueue.current.length > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -215,7 +204,6 @@ export function useWebSocket() {
             statusRef.current = 'disconnected';
             callbacksRef.current.setWsStatus('disconnected');
             if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
-            ensureFallbackPolling();
 
             failedAttemptsRef.current += 1;
 
@@ -235,7 +223,6 @@ export function useWebSocket() {
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
             if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
             if (portfolioRefreshTimer.current) clearTimeout(portfolioRefreshTimer.current);
-            stopFallbackPolling();
             wsRef.current?.close();
         };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally stable

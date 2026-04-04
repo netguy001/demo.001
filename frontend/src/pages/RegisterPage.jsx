@@ -54,25 +54,16 @@ const HOLDINGS_CONFIG = [
 /* ─── Left Panel: Animated Portfolio Visual ───────────────────── */
 function RegisterAnimation() {
   const tickerItems = useMarketIndicesStore((s) => s.tickerItems);
-  const startPublicPolling = useMarketIndicesStore((s) => s.startPublicPolling);
+  const startPolling = useMarketIndicesStore((s) => s.startPolling);
   const stopPolling = useMarketIndicesStore((s) => s.stopPolling);
 
   useEffect(() => {
-    startPublicPolling(30_000);
+    startPolling(30_000);
     return () => stopPolling();
-  }, [startPublicPolling, stopPolling]);
+  }, [startPolling, stopPolling]);
 
   const portfolioItems = useMemo(() => {
-    if (tickerItems.length === 0) {
-      // Fallback while loading
-      return [
-        { sym: "RELIANCE", qty: 10, avg: 1190, ltp: 1219, pnl: "+₹290", up: true, pct: "+2.4%" },
-        { sym: "TCS", qty: 5, avg: 2390, ltp: 2492, pnl: "+₹510", up: true, pct: "+4.3%" },
-        { sym: "HDFCBANK", qty: 20, avg: 862, ltp: 848, pnl: "-₹280", up: false, pct: "-1.6%" },
-        { sym: "INFY", qty: 15, avg: 1550, ltp: 1517, pnl: "-₹495", up: false, pct: "-2.1%" },
-        { sym: "AIRTEL", qty: 3, avg: 1538, ltp: 1587, pnl: "+₹147", up: true, pct: "+3.2%" },
-      ];
-    }
+    if (tickerItems.length === 0) return [];
     return HOLDINGS_CONFIG.map((cfg) => {
       const tick = tickerItems.find((t) => (t.name || "").includes(cfg.match));
       if (!tick) return null;

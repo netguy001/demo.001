@@ -22,15 +22,8 @@ const toSymbolAliases = (symbol = '') => {
 const normalizeIncomingQuote = (raw = {}, existing = {}) => {
     const price = toFiniteNumber(raw.price ?? raw.lp ?? raw.ltp ?? raw.last_price ?? raw.lastPrice);
     const prevClose = toFiniteNumber(raw.prev_close ?? raw.prevClose ?? raw.close ?? raw.pc ?? existing.prev_close);
-    let change = toFiniteNumber(raw.change ?? raw.net_change ?? raw.netChange);
-    let changePercent = toFiniteNumber(raw.change_percent ?? raw.changePercent ?? raw.pct_change ?? raw.pChange ?? raw.percent_change);
-
-    if (change == null && price != null && prevClose != null) {
-        change = price - prevClose;
-    }
-    if (changePercent == null && change != null && prevClose && prevClose !== 0) {
-        changePercent = (change / prevClose) * 100;
-    }
+    const change = toFiniteNumber(raw.change ?? raw.net_change ?? raw.netChange);
+    const changePercent = toFiniteNumber(raw.change_percent ?? raw.changePercent ?? raw.pct_change ?? raw.pChange ?? raw.percent_change);
 
     return {
         ...existing,

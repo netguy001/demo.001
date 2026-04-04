@@ -37,6 +37,7 @@ export function useMarketData(symbol, { pollInterval = 10_000 } = {}) {
     const [candles, setCandles] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [hasError, setHasError] = useState(false);
+    const [isMarketTrading, setIsMarketTrading] = useState(true);
 
     const MAX_CANDLE_RETRIES = 3;
 
@@ -94,6 +95,28 @@ export function useMarketData(symbol, { pollInterval = 10_000 } = {}) {
 
     // Track consecutive failures to avoid flashing error on transient network blips
     const failCountRef = useRef(0);
+
+    useEffect(() => {
+        let mounted = true;
+
+        const refreshMarketSession = async () => {
+            try {
+                const res = await api.get('/health');
+                const isTrading = Boolean(res?.data?.market_session?.is_trading);
+                if (mounted) setIsMarketTrading(isTrading);
+            } catch {
+                // Keep previous market-session state on transient failures.
+            }
+        };
+
+        refreshMarketSession();
+        const id = setInterval(refreshMarketSession, 60_000);
+        return () => {
+            mounted = false;
+            clearInterval(id);
+        };
+    }, []);
+
     const fetchQuote = useCallback(async () => {
         if (!symbol || isRateLimited()) return;
         try {
@@ -242,10 +265,10 @@ export function useMarketData(symbol, { pollInterval = 10_000 } = {}) {
     // Polling
     const intervalRef = useRef(null);
     useEffect(() => {
-        if (!symbol || pollInterval <= 0) return;
+        if (!symbol || pollInterval <= 0 || !isMarketTrading) return;
         intervalRef.current = setInterval(fetchQuote, pollInterval);
         return () => clearInterval(intervalRef.current);
-    }, [symbol, pollInterval, fetchQuote]);
+    }, [symbol, pollInterval, fetchQuote, isMarketTrading]);
 
     return {
         quote,

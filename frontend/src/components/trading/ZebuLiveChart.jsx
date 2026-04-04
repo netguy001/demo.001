@@ -811,6 +811,9 @@ const ZebuLiveChart = memo(function ZebuLiveChart({
         const cs = candleSeriesRef.current;
         const vs = volumeSeriesRef.current;
         if (!cs || !vs || !liveQuote?.price || candlesRef.current.length === 0) return;
+        if (liveQuote?._source !== 'live') return;
+        if (wsStatus !== 'connected') return;
+        if (!lastQuoteAt || (Date.now() - lastQuoteAt) > 90_000) return;
 
         const ltp = toFiniteNumber(liveQuote.price);
         if (ltp == null) return;
@@ -857,7 +860,7 @@ const ZebuLiveChart = memo(function ZebuLiveChart({
             axisLabelVisible: false,
             title: '',
         });
-    }, [liveQuote, candles]);
+    }, [liveQuote, candles, wsStatus, lastQuoteAt]);
 
     // ── Indicator overlays ────────────────────────────────────────
     useEffect(() => {
