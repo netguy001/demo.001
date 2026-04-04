@@ -600,36 +600,44 @@ async def send_phone_otp(
     if not ok:
         raise HTTPException(status_code=429, detail=err)
 
-    if settings.FAST2SMS_API_KEY:
-        # Production path — real SMS delivery
-        sms_sent = await send_otp_sms(phone_10, otp)
-        if not sms_sent:
-            raise HTTPException(
-                status_code=503,
-                detail="Could not send OTP SMS right now. Please try again shortly.",
-            )
-        channel = "sms"
-        delivery_hint = f"+91{'*' * 6}{phone_10[-4:]}"
-        logger.info("OTP dispatched via SMS to +91%s for uid=%s", phone_10, firebase_uid[:8])
-    else:
-        # Development / no-SMS fallback — send via registered email
+    # Helper: look up user email (needed for email fallback path)
+    async def _get_user_email():
         result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
-        user = result.scalar_one_or_none()
-        if not user:
+        u = result.scalar_one_or_none()
+        if not u:
             raise HTTPException(status_code=404, detail="User not found. Please complete registration first.")
+        return u
 
+    def _mask_email(email: str) -> str:
+        parts = email.split("@")
+        local = parts[0]
+        masked_local = local[:2] + "***" if len(local) > 2 else local[0] + "***"
+        return f"{masked_local}@{parts[1]}" if len(parts) == 2 else email
+
+    channel = None
+    delivery_hint = None
+
+    # Try SMS first if key is configured
+    if settings.FAST2SMS_API_KEY:
+        sms_sent = await send_otp_sms(phone_10, otp)
+        if sms_sent:
+            channel = "sms"
+            delivery_hint = f"+91{'*' * 6}{phone_10[-4:]}"
+            logger.info("OTP dispatched via SMS to +91%s for uid=%s", phone_10, firebase_uid[:8])
+        else:
+            logger.warning("Fast2SMS failed for +91%s — falling back to email", phone_10)
+
+    # Email fallback: used when no SMS key OR when SMS delivery failed
+    if channel is None:
+        user = await _get_user_email()
         email_sent = await send_phone_otp_email(user.email, otp, phone_10[-4:])
         if not email_sent:
             raise HTTPException(
                 status_code=503,
-                detail="Could not send OTP email right now. Please try again shortly.",
+                detail="Could not deliver OTP. Please try again shortly.",
             )
         channel = "email"
-        # Mask email: ab***@gmail.com
-        parts = user.email.split("@")
-        local = parts[0]
-        masked_local = local[:2] + "***" if len(local) > 2 else local[0] + "***"
-        delivery_hint = f"{masked_local}@{parts[1]}" if len(parts) == 2 else user.email
+        delivery_hint = _mask_email(user.email)
         logger.info("OTP dispatched via email to %s for uid=%s", delivery_hint, firebase_uid[:8])
 
     return {
