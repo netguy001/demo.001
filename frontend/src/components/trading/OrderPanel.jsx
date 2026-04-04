@@ -7,8 +7,6 @@ import { formatCurrency, formatPrice, cleanSymbol } from '../../utils/formatters
 import { ORDER_SIDE, ORDER_TYPE, TRADING_MODE, TRADING_MODE_INFO } from '../../utils/constants';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 
-const ORDER_TYPES = [ORDER_TYPE.MARKET, ORDER_TYPE.LIMIT, 'SL', 'SL-M'];
-
 /**
  * Order panel — buy/sell form with confirmation modal.
  *
@@ -33,13 +31,11 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
     const {
         form, setForm, setSide, setTradingMode,
         totalCost, isSubmitting, submitOrder,
-        holdingQty, canSell, maxSellQty,
+        holdingQty, canSell,
         isDelivery, isIntraday, marginRequired,
-        marketOpen, marketStateLabel,
+        marketOpen,
     } = useOrders(symbol, currentPrice);
 
-    // Sync initialSide prop (e.g. from positions SELL/EXIT button).
-    // useEffect handles both fresh mount (mobile drawer) and updates (desktop).
     const mountedRef = useRef(false);
     useEffect(() => {
         setTradingMode(TRADING_MODE.INTRADAY);
@@ -49,20 +45,18 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
         mountedRef.current = true;
     }, [initialSide, initialSideKey, setSide, setTradingMode]);
 
-    // Keyboard shortcuts (active when terminal is focused and user isn't in an input)
     useKeyboardShortcuts({
         'b': () => setSide(ORDER_SIDE.BUY),
         's': () => setSide(ORDER_SIDE.SELL),
     }, isTerminalFocused);
 
     const isBuy = form.side === ORDER_SIDE.BUY;
-    const isLimit = form.order_type === ORDER_TYPE.LIMIT;
-    const isSL = form.order_type === 'SL' || form.order_type === 'SL-M';
+    const showCompactPriceField = form.order_type === ORDER_TYPE.LIMIT || form.order_type === 'SL';
+    const selectedTradingProduct = ['MIS', 'CNC', 'NRML'].includes(form.product_type)
+        ? form.product_type
+        : (isDelivery ? 'CNC' : 'MIS');
 
-    // Block sell only for DELIVERY mode without holdings (real broker behavior)
     const sellBlocked = !isBuy && isDelivery && !canSell;
-
-    // Quantity exceeds holdings for delivery sell
     const qtyExceedsHoldings = !isBuy && isDelivery && canSell
         && (parseInt(form.quantity, 10) || 0) > holdingQty;
 
@@ -77,18 +71,42 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
 
     const modeInfo = TRADING_MODE_INFO[form.trading_mode];
 
-    return (
-        <div className={cn('flex flex-col h-full bg-surface-900', !isFloating && 'border-l border-edge/10')}>
-            {/* Header */}
-            <div className="px-4 py-3 border-b border-edge/5">
-                <h3 className="section-title text-xs mb-3">Order Panel</h3>
+    const handleTradingTypeChange = (nextProductType) => {
+        setForm((f) => {
+            const nextTradingMode = nextProductType === 'CNC' ? TRADING_MODE.DELIVERY : TRADING_MODE.INTRADAY;
+            const nextQty = (!isBuy && nextTradingMode === TRADING_MODE.DELIVERY && holdingQty > 0)
+                ? Math.min(parseInt(f.quantity, 10) || 1, holdingQty)
+                : f.quantity;
 
-                {/* Buy / Sell toggle — separate quick buttons */}
-                <div className="flex gap-2">
+            return {
+                ...f,
+                product_type: nextProductType,
+                trading_mode: nextTradingMode,
+                quantity: nextQty,
+            };
+        });
+    };
+
+    const handleOrderTypeChange = (nextOrderType) => {
+        setForm((f) => ({
+            ...f,
+            order_type: nextOrderType,
+            triggerPrice: nextOrderType === 'SL-M' && !f.triggerPrice
+                ? (currentPrice > 0 ? String(currentPrice) : '')
+                : f.triggerPrice,
+        }));
+    };
+
+    return (
+        <div className={cn('flex flex-col h-full w-full max-w-[300px] bg-surface-900', !isFloating && 'border-l border-edge/10')}>
+            <div className="px-3 py-2.5 border-b border-edge/5">
+                <h3 className="section-title text-xs mb-2">Order Panel</h3>
+
+                <div className="flex gap-1.5">
                     <button
                         onClick={() => setSide(ORDER_SIDE.BUY)}
                         className={cn(
-                            'flex-1 py-2 text-sm font-bold rounded-lg border transition-all duration-200',
+                            'flex-1 py-1.5 text-sm font-bold rounded-lg border transition-all duration-200',
                             isBuy
                                 ? 'bg-bull text-white border-emerald-500/40 shadow-lg shadow-emerald-500/20'
                                 : 'bg-surface-800/60 border-edge/10 text-gray-500 hover:text-gray-700 hover:bg-surface-800'
@@ -99,7 +117,7 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                     <button
                         onClick={() => setSide(ORDER_SIDE.SELL)}
                         className={cn(
-                            'flex-1 py-2 text-sm font-bold rounded-lg border transition-all duration-200',
+                            'flex-1 py-1.5 text-sm font-bold rounded-lg border transition-all duration-200',
                             !isBuy
                                 ? 'bg-bear text-white border-red-500/40 shadow-lg shadow-red-500/20'
                                 : 'bg-surface-800/60 border-edge/10 text-gray-500 hover:text-gray-700 hover:bg-surface-800'
@@ -110,176 +128,123 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                 </div>
             </div>
 
-            {/* Form */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-                {/* Symbol */}
-                <div>
-                    <label className="metric-label block mb-1">Symbol</label>
-                    <div className="bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm font-semibold text-heading flex items-center justify-between">
-                        <span>{cleanSymbol(symbol)}</span>
-                        <span className="text-xs text-gray-500 font-price tabular-nums">
-                            {currentPrice > 0 ? `₹${formatPrice(currentPrice)}` : ''}
-                        </span>
+            <div className="flex-1 overflow-y-auto px-3 py-2.5 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                    <div>
+                        <label className="metric-label block mb-1">Symbol</label>
+                        <div className="h-11 bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm font-semibold text-heading flex items-center justify-between">
+                            <span>{cleanSymbol(symbol)}</span>
+                            <span className="text-xs text-gray-500 font-price tabular-nums">
+                                {currentPrice > 0 ? `₹${formatPrice(currentPrice)}` : ''}
+                            </span>
+                        </div>
                     </div>
-                </div>
 
-                {/* ── Trading Mode (Delivery / Intraday) ─────────────────────
-                     This is the primary choice — like Zerodha, Groww, Angel One.
-                     Determines product type (CNC/MIS) and sell behavior. */}
-                <div>
-                    <label className="metric-label block mb-1">Trading Type</label>
-                    <div className="flex gap-2">
-                        {[TRADING_MODE.INTRADAY, TRADING_MODE.DELIVERY].map((mode) => {
-                            const info = TRADING_MODE_INFO[mode];
-                            const isActive = form.trading_mode === mode;
-                            return (
+                    <div>
+                        <div className="flex items-center justify-between mb-1">
+                            <label className="metric-label">Quantity</label>
+                            {!isBuy && isDelivery && holdingQty > 0 && (
                                 <button
-                                    key={mode}
-                                    onClick={() => setTradingMode(mode)}
-                                    className={cn(
-                                        'flex-1 py-2 px-2 rounded-lg border transition-all duration-200 text-center',
-                                        isActive
-                                            ? mode === TRADING_MODE.INTRADAY
-                                                ? 'bg-amber-600/20 text-amber-400 border-amber-500/30 shadow-sm'
-                                                : 'bg-blue-600/20 text-blue-400 border-blue-500/30 shadow-sm'
-                                            : 'bg-surface-800/60 border-edge/10 text-gray-500 hover:text-gray-400 hover:bg-surface-700/40'
-                                    )}
+                                    onClick={() => setForm((f) => ({ ...f, quantity: holdingQty }))}
+                                    className="text-[10px] text-primary-500 hover:text-primary-400 transition-colors"
                                 >
-                                    <div className="text-xs font-bold">{info.label}</div>
-                                    <div className="text-[10px] opacity-70 mt-0.5">{info.sublabel}</div>
+                                    Max: {holdingQty}
                                 </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* Order type — segmented pill */}
-                <div>
-                    <label className="metric-label block mb-1">Order Type</label>
-                    <div className="grid grid-cols-2 gap-2">
-                        {ORDER_TYPES.map((t) => (
+                            )}
+                        </div>
+                        <div className="h-11 flex items-center border border-edge/10 rounded-lg overflow-hidden bg-surface-800/60">
                             <button
-                                key={t}
-                                onClick={() => setForm((f) => ({ ...f, order_type: t }))}
-                                className={cn(
-                                    'py-2 text-xs font-semibold rounded-md border transition-all duration-150',
-                                    form.order_type === t
-                                        ? 'bg-primary-600/25 text-primary-600 border-primary-500/30 shadow-sm'
-                                        : 'bg-surface-800/60 border-edge/10 text-gray-500 hover:text-gray-700 hover:bg-surface-700/40'
-                                )}
+                                type="button"
+                                onClick={() => setForm((f) => ({ ...f, quantity: Math.max(1, (parseInt(f.quantity, 10) || 1) - 1) }))}
+                                className="px-3 py-2 text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all text-lg font-bold"
                             >
-                                {t}
+                                −
                             </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Quantity with stepper */}
-                <div>
-                    <div className="flex items-center justify-between mb-1">
-                        <label className="metric-label">Quantity</label>
-                        {/* Show max sellable qty for delivery sell */}
-                        {!isBuy && isDelivery && holdingQty > 0 && (
+                            <input
+                                type="number"
+                                min={1}
+                                max={!isBuy && isDelivery && holdingQty > 0 ? holdingQty : undefined}
+                                value={form.quantity}
+                                onChange={(e) => {
+                                    const raw = e.target.value;
+                                    if (raw === '') {
+                                        setForm((f) => ({ ...f, quantity: '' }));
+                                        return;
+                                    }
+                                    const val = parseInt(raw, 10);
+                                    if (!isNaN(val) && val >= 0) {
+                                        setForm((f) => ({ ...f, quantity: val }));
+                                    }
+                                }}
+                                onBlur={() => {
+                                    setForm((f) => ({ ...f, quantity: Math.max(1, parseInt(f.quantity, 10) || 1) }));
+                                }}
+                                className="min-w-0 flex-1 text-center bg-transparent text-heading text-sm font-price py-2 focus:outline-none tabular-nums"
+                            />
                             <button
-                                onClick={() => setForm((f) => ({ ...f, quantity: holdingQty }))}
-                                className="text-[10px] text-primary-500 hover:text-primary-400 transition-colors"
+                                type="button"
+                                onClick={() => setForm((f) => ({ ...f, quantity: (parseInt(f.quantity, 10) || 0) + 1 }))}
+                                className="px-3 py-2 text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all text-lg font-bold flex-shrink-0"
                             >
-                                Max: {holdingQty}
+                                +
                             </button>
+                        </div>
+                        {qtyExceedsHoldings && (
+                            <p className="text-[10px] text-red-400 mt-1 px-1">
+                                You only hold {holdingQty} shares. Reduce quantity to {holdingQty} or less.
+                            </p>
                         )}
                     </div>
-                    <div className="flex items-center border border-edge/10 rounded-lg overflow-hidden bg-surface-800/60">
-                        <button
-                            type="button"
-                            onClick={() => setForm((f) => ({ ...f, quantity: Math.max(1, (parseInt(f.quantity) || 1) - 1) }))}
-                            className="px-3 py-2 text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all text-lg font-bold"
-                        >
-                            −
-                        </button>
-                        <input
-                            type="number"
-                            min={1}
-                            max={!isBuy && isDelivery && holdingQty > 0 ? holdingQty : undefined}
-                            value={form.quantity}
-                            onChange={(e) => {
-                                const raw = e.target.value;
-                                if (raw === '') {
-                                    setForm((f) => ({ ...f, quantity: '' }));
-                                    return;
-                                }
-                                const val = parseInt(raw, 10);
-                                if (!isNaN(val) && val >= 0) {
-                                    setForm((f) => ({ ...f, quantity: val }));
-                                }
-                            }}
-                            onBlur={() => {
-                                setForm((f) => ({ ...f, quantity: Math.max(1, parseInt(f.quantity) || 1) }));
-                            }}
-                            className="min-w-0 flex-1 text-center bg-transparent text-heading text-sm font-price py-2 focus:outline-none tabular-nums"
-                        />
-                        <button
-                            type="button"
-                            onClick={() => setForm((f) => ({ ...f, quantity: (parseInt(f.quantity) || 0) + 1 }))}
-                            className="px-3 py-2 text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all text-lg font-bold flex-shrink-0"
-                        >
-                            +
-                        </button>
-                    </div>
-                    {/* Warning if qty exceeds holdings in delivery mode */}
-                    {qtyExceedsHoldings && (
-                        <p className="text-[10px] text-red-400 mt-1 px-1">
-                            You only hold {holdingQty} shares. Reduce quantity to {holdingQty} or less.
-                        </p>
-                    )}
                 </div>
 
-                {/* Price (for LIMIT orders) */}
-                {isLimit && (
+                <div className="grid grid-cols-2 gap-2">
                     <div>
-                        <label className="metric-label block mb-1">Limit Price (₹)</label>
+                        <label className="metric-label block mb-1">Trading type</label>
+                        <select
+                            value={selectedTradingProduct}
+                            onChange={(e) => handleTradingTypeChange(e.target.value)}
+                            className="h-11 w-full bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm text-heading focus:outline-none focus:border-primary-500/30"
+                        >
+                            <option value="MIS">Intraday (MIS)</option>
+                            <option value="CNC">Delivery (CNC)</option>
+                            <option value="NRML">Normal (NRML)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="metric-label block mb-1">Order type</label>
+                        <select
+                            value={form.order_type}
+                            onChange={(e) => handleOrderTypeChange(e.target.value)}
+                            className="h-11 w-full bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm text-heading focus:outline-none focus:border-primary-500/30"
+                        >
+                            <option value="MARKET">Market</option>
+                            <option value="LIMIT">Limit</option>
+                            <option value="SL">SL</option>
+                            <option value="SL-M">SL-M</option>
+                        </select>
+                    </div>
+                </div>
+
+                {showCompactPriceField && (
+                    <div>
+                        <label className="metric-label block mb-1">Price (₹)</label>
                         <input
                             type="number"
                             step="0.05"
-                            value={form.price}
-                            onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+                            value={form.order_type === 'SL' ? form.triggerPrice : form.price}
+                            onChange={(e) => setForm((f) => ({
+                                ...f,
+                                ...(form.order_type === 'SL'
+                                    ? { triggerPrice: e.target.value }
+                                    : { price: e.target.value }),
+                            }))}
                             placeholder={formatPrice(currentPrice)}
                             className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm font-price text-heading placeholder-gray-600 focus:outline-none focus:border-primary-500/30 tabular-nums"
                         />
                     </div>
                 )}
 
-                {/* Trigger price (for SL/SL-M) */}
-                {isSL && (
-                    <div>
-                        <label className="metric-label block mb-1">Trigger Price (₹)</label>
-                        <input
-                            type="number"
-                            step="0.05"
-                            value={form.triggerPrice}
-                            onChange={(e) => setForm((f) => ({ ...f, triggerPrice: e.target.value }))}
-                            placeholder={formatPrice(currentPrice)}
-                            className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm font-price text-heading placeholder-gray-600 focus:outline-none focus:border-primary-500/30 tabular-nums"
-                        />
-                    </div>
-                )}
-
-                {/* Limit price (for SL-M only — order fills at this price after trigger) */}
-                {form.order_type === 'SL-M' && (
-                    <div>
-                        <label className="metric-label block mb-1">Limit Price (₹)</label>
-                        <input
-                            type="number"
-                            step="0.05"
-                            value={form.price}
-                            onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-                            placeholder={formatPrice(currentPrice)}
-                            className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm font-price text-heading placeholder-gray-600 focus:outline-none focus:border-primary-500/30 tabular-nums"
-                        />
-                    </div>
-                )}
-
-                {/* Order summary */}
-                <div className="rounded-xl bg-surface-800/40 border border-edge/5 p-3 space-y-2">
+                <div className="rounded-xl bg-surface-800/40 border border-edge/5 p-2.5 space-y-2">
                     <div className="flex justify-between text-xs">
                         <span className="text-gray-500">Est. Value</span>
                         <span className="font-price text-heading font-semibold tabular-nums">{formatCurrency(totalCost)}</span>
@@ -287,22 +252,20 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                     <div className="flex justify-between text-xs">
                         <span className="text-gray-500">Qty × Price</span>
                         <span className="font-price text-gray-400 tabular-nums">
-                            {form.quantity || 0} × {isLimit && form.price ? `₹${form.price}` : `₹${formatPrice(currentPrice)}`}
+                            {form.quantity || 0} × {form.order_type === ORDER_TYPE.LIMIT && form.price ? `₹${form.price}` : `₹${formatPrice(currentPrice)}`}
                         </span>
                     </div>
-                    {/* Product type indicator */}
                     <div className="flex justify-between text-xs">
                         <span className="text-gray-500">Product</span>
                         <span className={cn(
-                            "font-semibold text-xs px-1.5 py-0.5 rounded",
+                            'font-semibold text-xs px-1.5 py-0.5 rounded',
                             isDelivery
-                                ? "bg-blue-500/10 text-blue-400"
-                                : "bg-amber-500/10 text-amber-400"
+                                ? 'bg-blue-500/10 text-blue-400'
+                                : 'bg-amber-500/10 text-amber-400'
                         )}>
                             {form.product_type} ({modeInfo.label})
                         </span>
                     </div>
-                    {/* Margin estimate for intraday */}
                     {isIntraday && totalCost > 0 && (
                         <div className="flex justify-between text-xs border-t border-edge/5 pt-2 mt-1">
                             <span className="text-gray-500">Margin Required (5×)</span>
@@ -314,22 +277,7 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                 </div>
             </div>
 
-            {/* Submit button — sticky at bottom */}
-            <div className="sticky bottom-0 px-4 py-3 border-t border-edge/5 bg-surface-900">
-                {/* ── Market Closed banner ─────────────────────────────── */}
-                {!marketOpen && (
-                    <div className="mb-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 flex items-center gap-2">
-                        <span className="text-base">⏸</span>
-                        <div>
-                            <span className="font-semibold">{marketStateLabel || 'Market Closed'}</span>
-                            <span className="text-amber-500/80"> — Orders available Mon–Fri, 9:15 AM – 3:30 PM IST</span>
-                        </div>
-                    </div>
-                )}
-
-                {/* ── Sell context messages ──────────────────────────────── */}
-
-                {/* DELIVERY SELL — no holdings: blocked */}
+            <div className="sticky bottom-0 px-3 py-2.5 border-t border-edge/5 bg-surface-900">
                 {!isBuy && isDelivery && !canSell && (
                     <div className="mb-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
                         <span className="font-semibold">No holdings found.</span> In Delivery (CNC) mode, you can only sell shares you already own.
@@ -337,20 +285,18 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                     </div>
                 )}
 
-                {/* DELIVERY SELL — has holdings: show available qty */}
                 {!isBuy && isDelivery && canSell && (
                     <div className="mb-2 px-3 py-1.5 rounded-lg bg-surface-800/60 border border-edge/10 text-xs text-gray-400">
                         Available to sell: <span className="font-semibold text-heading">{holdingQty}</span> shares (Delivery)
                     </div>
                 )}
 
-
                 <Button
                     variant={isBuy ? 'buy' : 'sell'}
                     size="lg"
                     className={cn(
-                        "w-full py-3.5 text-base",
-                        (sellBlocked || qtyExceedsHoldings || !marketOpen) && "!opacity-40 !cursor-not-allowed !shadow-none !bg-gray-600 hover:!bg-gray-600"
+                        'w-full py-2.5 text-base',
+                        (sellBlocked || qtyExceedsHoldings || !marketOpen) && '!opacity-40 !cursor-not-allowed !shadow-none !bg-gray-600 hover:!bg-gray-600'
                     )}
                     onClick={() => {
                         if (sellBlocked || qtyExceedsHoldings || !marketOpen) return;
@@ -373,7 +319,6 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                 </p>
             </div>
 
-            {/* Confirmation Modal */}
             <Modal
                 isOpen={confirmOpen}
                 onClose={() => setConfirmOpen(false)}
@@ -381,7 +326,6 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                 size="sm"
             >
                 <div className="px-6 py-4 space-y-4">
-                    {/* Summary */}
                     <div className="rounded-xl border border-edge/10 bg-surface-900/50 divide-y divide-edge/5 text-sm">
                         {[
                             ['Side', <span className={cn('font-bold', isBuy ? 'text-bull' : 'text-bear')}>{form.side}</span>],
@@ -402,13 +346,11 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                         ))}
                     </div>
 
-                    {/* Block confirm for delivery sell without holdings */}
                     {sellBlocked && (
                         <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
                             No holdings for {cleanSymbol(symbol)}. Switch to Intraday for short selling.
                         </div>
                     )}
-                    {/* Qty exceeds holdings warning */}
                     {qtyExceedsHoldings && (
                         <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
                             Quantity ({form.quantity}) exceeds your holdings ({holdingQty}). Reduce quantity.
