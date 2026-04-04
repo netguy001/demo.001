@@ -193,25 +193,29 @@ export default function Sidebar({ collapsed, onToggle }) {
         {/* ── Brand row ── */}
         <div
           className={cn(
-            "flex-shrink-0 transition-all duration-300",
+            "relative flex-shrink-0 h-20 transition-all duration-300",
             collapsed
-              ? "flex flex-col items-center gap-2 py-2.5 px-2"
-              : "flex flex-col gap-0.5 justify-center h-20 px-4",
+              ? "px-2 py-2"
+              : "px-4 py-2",
           )}
         >
-          {collapsed && (
-            <button
-              type="button"
-              onClick={onToggle}
-              aria-label="Expand sidebar"
-              title="Expand sidebar"
-              className="p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={cn(
+              "absolute top-2 p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300",
+              collapsed ? "left-1/2 -translate-x-1/2" : "right-2"
+            )}
+          >
+            {collapsed ? <Menu className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+          </button>
 
-          <div className="flex items-center justify-between w-full">
+          <div className={cn(
+            "flex items-center w-full h-full",
+            collapsed ? "justify-center pt-5" : "justify-start pr-10"
+          )}>
             {collapsed ? (
               <a href="https://www.alphasync.app/">
                 <img
@@ -221,24 +225,13 @@ export default function Sidebar({ collapsed, onToggle }) {
                 />
               </a>
             ) : (
-              <>
-                <a href="https://www.alphasync.app/" className="block min-w-0 flex-1">
-                  <img
-                    src="/logo-full.png"
-                    alt="AlphaSync"
-                    className="h-14 max-w-[180px] object-contain object-left transition-all duration-300 logo-light-adapt"
-                  />
-                </a>
-                <button
-                  type="button"
-                  onClick={onToggle}
-                  aria-label="Collapse sidebar"
-                  title="Collapse sidebar"
-                  className="p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300"
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-              </>
+              <a href="https://www.alphasync.app/" className="block min-w-0 flex-1">
+                <img
+                  src="/logo-full.png"
+                  alt="AlphaSync"
+                  className="h-14 max-w-[180px] object-contain object-left transition-all duration-300 logo-light-adapt"
+                />
+              </a>
             )}
           </div>
           {/* Tagline — only visible when collapsed (expanded version is inline with logo) */}
