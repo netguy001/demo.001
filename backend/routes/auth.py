@@ -165,17 +165,10 @@ class SyncRequest(BaseModel):
     auth_intent: Optional[str] = None
 
 
-class SendPhoneOTPRequest(BaseModel):
-    """Request to send an OTP to a mobile number."""
-
-    phone: str  # 10-digit Indian mobile or +91XXXXXXXXXX
-
-
 class PhoneSubmitRequest(BaseModel):
-    """Phone number + OTP submission to verify and save."""
+    """Phone number submission — validated and saved as contact info."""
 
     phone: str  # 10-digit Indian mobile or +91XXXXXXXXXX
-    otp: str    # 6-digit OTP received via SMS
 
 
 # --- Core Dependency: get_current_user ---
@@ -567,88 +560,6 @@ def _require_firebase_uid(credentials) -> str:
     return uid
 
 
-@router.post("/send-phone-otp")
-async def send_phone_otp(
-    req: SendPhoneOTPRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Step 1 — send a 6-digit OTP to the supplied Indian mobile number.
-
-    If FAST2SMS_API_KEY is configured the OTP is delivered via SMS.
-    Otherwise it falls back to the user's registered email address so
-    the flow is fully testable without an SMS account.
-
-    Rate limits: max 5 sends per phone per hour; 60 s cooldown between sends.
-    """
-    from services.otp_service import generate_and_store_otp, send_otp_sms
-    from services.email_service import send_phone_otp_email
-
-    firebase_uid = _require_firebase_uid(credentials)
-
-    normalised = _normalise_phone(req.phone)
-    if not normalised:
-        raise HTTPException(
-            status_code=400,
-            detail="Please enter a valid 10-digit Indian mobile number (starts with 6–9).",
-        )
-
-    phone_10 = normalised[3:]
-
-    ok, otp, err = await generate_and_store_otp(firebase_uid, normalised)
-    if not ok:
-        raise HTTPException(status_code=429, detail=err)
-
-    # Helper: look up user email (needed for email fallback path)
-    async def _get_user_email():
-        result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
-        u = result.scalar_one_or_none()
-        if not u:
-            raise HTTPException(status_code=404, detail="User not found. Please complete registration first.")
-        return u
-
-    def _mask_email(email: str) -> str:
-        parts = email.split("@")
-        local = parts[0]
-        masked_local = local[:2] + "***" if len(local) > 2 else local[0] + "***"
-        return f"{masked_local}@{parts[1]}" if len(parts) == 2 else email
-
-    channel = None
-    delivery_hint = None
-
-    # Try SMS first if key is configured
-    if settings.FAST2SMS_API_KEY:
-        sms_sent = await send_otp_sms(phone_10, otp)
-        if sms_sent:
-            channel = "sms"
-            delivery_hint = f"+91{'*' * 6}{phone_10[-4:]}"
-            logger.info("OTP dispatched via SMS to +91%s for uid=%s", phone_10, firebase_uid[:8])
-        else:
-            logger.warning("Fast2SMS failed for +91%s — falling back to email", phone_10)
-
-    # Email fallback: used when no SMS key OR when SMS delivery failed
-    if channel is None:
-        user = await _get_user_email()
-        email_sent = await send_phone_otp_email(user.email, otp, phone_10[-4:])
-        if not email_sent:
-            raise HTTPException(
-                status_code=503,
-                detail="Could not deliver OTP. Please try again shortly.",
-            )
-        channel = "email"
-        delivery_hint = _mask_email(user.email)
-        logger.info("OTP dispatched via email to %s for uid=%s", delivery_hint, firebase_uid[:8])
-
-    return {
-        "message": f"OTP sent. Valid for 10 minutes.",
-        "expires_in": 600,
-        "cooldown": 60,
-        "channel": channel,
-        "delivery_hint": delivery_hint,
-    }
-
-
 @router.post("/set-phone")
 async def set_phone(
     req: PhoneSubmitRequest,
@@ -656,13 +567,12 @@ async def set_phone(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Step 2 — verify the OTP and persist the phone number.
+    Save the user's Indian mobile number as contact info.
 
+    Validates the number format (10-digit, starts with 6-9) and persists it.
     Does NOT enforce account_status so pending_approval users can complete
-    their profile.  Requires a valid Firebase token + the 6-digit OTP.
+    their profile. No OTP required — number is for contact purposes only.
     """
-    from services.otp_service import verify_otp
-
     firebase_uid = _require_firebase_uid(credentials)
 
     normalised = _normalise_phone(req.phone)
@@ -671,14 +581,6 @@ async def set_phone(
             status_code=400,
             detail="Please enter a valid 10-digit Indian mobile number (starts with 6–9).",
         )
-
-    otp_val = req.otp.strip()
-    if not re.fullmatch(r"\d{6}", otp_val):
-        raise HTTPException(status_code=400, detail="OTP must be exactly 6 digits.")
-
-    verified, err = await verify_otp(firebase_uid, normalised, otp_val)
-    if not verified:
-        raise HTTPException(status_code=400, detail=err)
 
     result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
     user = result.scalar_one_or_none()
@@ -690,8 +592,8 @@ async def set_phone(
     await db.commit()
     await db.refresh(user)
 
-    logger.info("Phone verified & saved for %s → %s", user.email, normalised)
-    return {"message": "Mobile number verified and saved.", "phone": user.phone}
+    logger.info("Phone saved for %s → %s", user.email, normalised)
+    return {"message": "Mobile number saved.", "phone": user.phone}
 
 
 @router.get("/me")

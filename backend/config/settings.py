@@ -87,11 +87,13 @@ class Settings(BaseSettings):
     # Root admin email — has unrestricted access and can create/manage other admins.
     ROOT_ADMIN_EMAIL: str = "meganath1025@gmail.com"
 
-    # ── SMS (OTP delivery for phone verification) ────────────────────
-    # Provider: Fast2SMS (https://www.fast2sms.com)
-    # Leave blank during development — OTP will be printed to the server log.
-    # Set to your Fast2SMS API key in production for real SMS delivery.
-    FAST2SMS_API_KEY: str = ""
+    # ── SMS (OTP delivery for phone verification via Twilio) ─────────
+    # Twilio sends from an international number — no Indian DLT registration needed.
+    # Sign up at https://www.twilio.com/try-twilio (free trial credit included).
+    # Leave blank to fall back to email OTP delivery.
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_PHONE_NUMBER: str = ""  # e.g. +12025551234 — your Twilio number
 
     # SMTP for email notifications (Gmail)
     SMTP_HOST: str = "smtp.gmail.com"

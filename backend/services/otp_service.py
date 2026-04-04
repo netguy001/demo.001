@@ -182,54 +182,59 @@ async def verify_otp(firebase_uid: str, phone_e164: str, otp_input: str) -> Tupl
         await client.aclose()
 
 
-# ── SMS dispatch ─────────────────────────────────────────────────────────────
+# ── SMS dispatch (Twilio — international sender, no DLT required in India) ────
 
 async def send_otp_sms(phone_digits_10: str, otp: str) -> bool:
     """
-    Send OTP via Fast2SMS.
+    Send OTP via Twilio.
 
-    If FAST2SMS_API_KEY is not configured the OTP is only logged —
-    this allows the app to function in development without an SMS account.
-    Set the key in settings / environment to enable real SMS delivery.
+    Twilio sends from an international number which bypasses Indian DLT
+    registration requirements. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
+    and TWILIO_PHONE_NUMBER in settings/environment.
+
+    Returns False (not True) when unconfigured so the caller's email fallback
+    is triggered automatically during development.
     """
     from config.settings import settings
+    import base64
+
+    if not getattr(settings, "TWILIO_ACCOUNT_SID", ""):
+        logger.warning(
+            "[DEV MODE] Twilio not configured — SMS skipped for +91%s",
+            phone_digits_10,
+        )
+        return False  # triggers email fallback in caller
 
     message = (
         f"Your AlphaSync OTP is {otp}. "
         "Valid for 10 minutes. Do not share this code with anyone."
     )
 
-    if not getattr(settings, "FAST2SMS_API_KEY", ""):
-        logger.warning(
-            "[DEV MODE] SMS not configured — OTP for +91%s is: %s",
-            phone_digits_10,
-            otp,
-        )
-        return True   # Allow flow to continue in development
-
     try:
         import aiohttp
 
+        credentials = base64.b64encode(
+            f"{settings.TWILIO_ACCOUNT_SID}:{settings.TWILIO_AUTH_TOKEN}".encode()
+        ).decode()
+
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://www.fast2sms.com/dev/bulkV2",
-                headers={"authorization": settings.FAST2SMS_API_KEY},
-                json={
-                    "route":    "q",
-                    "message":  message,
-                    "language": "english",
-                    "flash":    0,
-                    "numbers":  phone_digits_10,
+                f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json",
+                headers={"Authorization": f"Basic {credentials}"},
+                data={
+                    "From": settings.TWILIO_PHONE_NUMBER,
+                    "To":   f"+91{phone_digits_10}",
+                    "Body": message,
                 },
-                timeout=aiohttp.ClientTimeout(total=12),
+                timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 body = await resp.json(content_type=None)
-                if resp.status == 200 and body.get("return"):
-                    logger.info("OTP SMS sent to +91%s", phone_digits_10)
+                if resp.status in (200, 201) and body.get("sid"):
+                    logger.info("OTP SMS sent via Twilio to +91%s", phone_digits_10)
                     return True
-                logger.error("Fast2SMS API error (status=%s): %s", resp.status, body)
+                logger.error("Twilio API error (status=%s): %s", resp.status, body)
                 return False
 
     except Exception as exc:
-        logger.error("SMS dispatch failed for +91%s: %s", phone_digits_10, exc, exc_info=True)
+        logger.error("Twilio SMS dispatch failed for +91%s: %s", phone_digits_10, exc, exc_info=True)
         return False

@@ -1,5 +1,5 @@
 // LoginPage.jsx — Combined Login + Register (exact match to demo-login.html)
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../stores/useAuthStore";
 import toast from "react-hot-toast";
@@ -48,24 +48,17 @@ export default function LoginPage() {
   const [showLoginPass, setShowLoginPass] = useState(false);
   const [showRegPass, setShowRegPass] = useState(false);
 
-  // ── Phone + OTP modal state ───────────────────────────────────────────
+  // ── Phone collection modal state ─────────────────────────────────────
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [pendingProfile, setPendingProfile] = useState(null);
-  const [phoneStep, setPhoneStep] = useState("enter"); // "enter" | "verify"
   const [phoneValue, setPhoneValue] = useState("");
-  const [otpValue, setOtpValue] = useState("");
   const [phoneLoading, setPhoneLoading] = useState(false);
   const [phoneError, setPhoneError] = useState("");
-  const [countdown, setCountdown] = useState(0);
-  const countdownRef = useRef(null);
-  const [otpChannel, setOtpChannel] = useState("sms"); // "sms" | "email"
-  const [otpDeliveryHint, setOtpDeliveryHint] = useState("");
 
   const loginWithEmail = useAuthStore((s) => s.loginWithEmail);
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
   const registerWithEmail = useAuthStore((s) => s.registerWithEmail);
   const resendVerification = useAuthStore((s) => s.resendVerification);
-  const sendPhoneOtp = useAuthStore((s) => s.sendPhoneOtp);
   const submitPhone = useAuthStore((s) => s.submitPhone);
   const existingUser = useAuthStore((s) => s.user);
   const navigate = useNavigate();
@@ -97,26 +90,10 @@ export default function LoginPage() {
     }
   };
 
-  // ── Phone gate helpers ────────────────────────────────────────────────
-  const startCountdown = useCallback((seconds = 60) => {
-    setCountdown(seconds);
-    if (countdownRef.current) clearInterval(countdownRef.current);
-    countdownRef.current = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) { clearInterval(countdownRef.current); return 0; }
-        return c - 1;
-      });
-    }, 1000);
-  }, []);
-
-  const validatePhone = (val) => {
-    const d = val.replace(/\D/g, "");
-    return /^[6-9]\d{9}$/.test(d);
-  };
+  const validatePhone = (val) => /^[6-9]\d{9}$/.test(val.replace(/\D/g, ""));
 
   // ── Phone gate: show modal if user has no phone, otherwise route ─────
   const handleAuthSuccess = (profile) => {
-    // Admin users bypass the phone gate entirely
     if ((profile?.role || "").toLowerCase() === "admin") {
       routeByAccountStatus(profile);
       return;
@@ -124,20 +101,15 @@ export default function LoginPage() {
     if (!profile?.phone) {
       setPendingProfile(profile);
       setPhoneValue("");
-      setOtpValue("");
       setPhoneError("");
-      setPhoneStep("enter");
-      setCountdown(0);
-      setOtpChannel("sms");
-      setOtpDeliveryHint("");
       setShowPhoneModal(true);
     } else {
       routeByAccountStatus(profile);
     }
   };
 
-  // Step 1 — send OTP
-  const handleSendOtp = async () => {
+  // Submit phone number (no OTP — just validate format and save)
+  const handleSubmitPhone = async () => {
     if (!validatePhone(phoneValue)) {
       setPhoneError("Enter a valid 10-digit Indian mobile number (starts with 6–9).");
       return;
@@ -145,62 +117,12 @@ export default function LoginPage() {
     setPhoneError("");
     setPhoneLoading(true);
     try {
-      const res = await sendPhoneOtp(phoneValue);
-      setOtpChannel(res?.channel || "sms");
-      setOtpDeliveryHint(res?.delivery_hint || "");
-      setOtpValue("");
-      setPhoneStep("verify");
-      startCountdown(60);
-      const dest = res?.channel === "email"
-        ? `your email (${res?.delivery_hint || "inbox"})`
-        : "your mobile via SMS";
-      toast.success(`OTP sent to ${dest}!`);
-    } catch (err) {
-      setPhoneError(
-        err?.response?.data?.detail || err?.message || "Failed to send OTP. Try again."
-      );
-    } finally {
-      setPhoneLoading(false);
-    }
-  };
-
-  // Step 1 resend (back + re-send)
-  const handleResendOtp = async () => {
-    if (countdown > 0) return;
-    setPhoneError("");
-    setPhoneLoading(true);
-    try {
-      const res = await sendPhoneOtp(phoneValue);
-      setOtpChannel(res?.channel || "sms");
-      setOtpDeliveryHint(res?.delivery_hint || "");
-      setOtpValue("");
-      startCountdown(60);
-      toast.success("OTP resent!");
-    } catch (err) {
-      setPhoneError(
-        err?.response?.data?.detail || err?.message || "Failed to resend OTP."
-      );
-    } finally {
-      setPhoneLoading(false);
-    }
-  };
-
-  // Step 2 — verify OTP and save
-  const handleVerifyOtp = async () => {
-    if (otpValue.length !== 6) {
-      setPhoneError(`Enter the 6-digit OTP sent to your ${otpChannel === "email" ? "email" : "mobile"}.`);
-      return;
-    }
-    setPhoneError("");
-    setPhoneLoading(true);
-    try {
-      await submitPhone(phoneValue, otpValue);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      await submitPhone(phoneValue);
       setShowPhoneModal(false);
       routeByAccountStatus(pendingProfile);
     } catch (err) {
       setPhoneError(
-        err?.response?.data?.detail || err?.message || "Verification failed. Try again."
+        err?.response?.data?.detail || err?.message || "Failed to save number. Try again."
       );
     } finally {
       setPhoneLoading(false);
@@ -364,250 +286,97 @@ export default function LoginPage() {
               pointerEvents: "none",
             }} />
 
-            {/* Step indicator */}
-            <div style={{ display: "flex", alignItems: "center", gap: ".5rem", marginBottom: "1.5rem" }}>
-              {["Enter Number", "Verify OTP"].map((label, i) => {
-                const stepIdx = phoneStep === "enter" ? 0 : 1;
-                const done = i < stepIdx;
-                const active = i === stepIdx;
-                return (
-                  <div key={label} style={{ display: "flex", alignItems: "center", gap: ".4rem" }}>
-                    <div style={{
-                      width: 26, height: 26, borderRadius: "50%",
-                      background: done ? "#10b981" : active ? "#06b6d4" : "rgba(255,255,255,0.08)",
-                      border: `2px solid ${done ? "#10b981" : active ? "#06b6d4" : "rgba(255,255,255,0.15)"}`,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: ".7rem", fontWeight: 800, color: "#fff",
-                      flexShrink: 0,
-                    }}>
-                      {done ? "✓" : i + 1}
-                    </div>
-                    <span style={{
-                      fontSize: ".72rem", fontWeight: active ? 700 : 500,
-                      color: active ? "#06b6d4" : done ? "#10b981" : "rgba(255,255,255,0.35)",
-                      textTransform: "uppercase", letterSpacing: ".05em",
-                    }}>{label}</span>
-                    {i < 1 && <div style={{ width: 28, height: 2, borderRadius: 2, background: done ? "#10b981" : "rgba(255,255,255,0.1)", margin: "0 .25rem" }} />}
-                  </div>
-                );
-              })}
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", gap: ".85rem", marginBottom: "1.25rem" }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: 16, flexShrink: 0,
+                background: "rgba(6,182,212,0.12)", border: "1px solid rgba(6,182,212,0.25)",
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem",
+              }}>📱</div>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, letterSpacing: "-.01em" }}>
+                  Add your mobile number
+                </h2>
+                <p style={{ margin: ".2rem 0 0", fontSize: ".8rem", color: "#94a3b8" }}>
+                  One-time step — skipped on all future sign-ins
+                </p>
+              </div>
             </div>
 
-            {/* ── STEP 1: Enter phone ── */}
-            {phoneStep === "enter" && (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: ".85rem", marginBottom: "1.25rem" }}>
-                  <div style={{
-                    width: 52, height: 52, borderRadius: 16, flexShrink: 0,
-                    background: "rgba(6,182,212,0.12)", border: "1px solid rgba(6,182,212,0.25)",
-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem",
-                  }}>📱</div>
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, letterSpacing: "-.01em" }}>
-                      Verify your mobile number
-                    </h2>
-                    <p style={{ margin: ".2rem 0 0", fontSize: ".8rem", color: "#94a3b8" }}>
-                      One-time step — skipped on all future sign-ins
-                    </p>
-                  </div>
-                </div>
+            <p style={{ fontSize: ".83rem", color: "#cbd5e1", lineHeight: 1.65, marginBottom: "1.5rem" }}>
+              Your Indian mobile number is saved as <strong style={{ color: "#06b6d4" }}>contact information</strong> and
+              will be visible to account admins.
+            </p>
 
-                <p style={{ fontSize: ".83rem", color: "#cbd5e1", lineHeight: 1.65, marginBottom: "1.5rem" }}>
-                  We'll send a <strong style={{ color: "#06b6d4" }}>6-digit OTP</strong> to your Indian mobile number
-                  to confirm your identity. This number will be visible to account admins.
-                </p>
+            <label style={{ display: "block", fontSize: ".72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "#64748b", marginBottom: ".5rem" }}>
+              Mobile Number
+            </label>
+            <div style={{ display: "flex", gap: ".6rem", marginBottom: ".6rem" }}>
+              <div style={{
+                display: "flex", alignItems: "center", gap: ".4rem",
+                padding: ".65rem .85rem",
+                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 12, fontSize: ".85rem", color: "#94a3b8", whiteSpace: "nowrap",
+                userSelect: "none",
+              }}>
+                🇮🇳 <span style={{ fontWeight: 700, color: "#cbd5e1" }}>+91</span>
+              </div>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="98765 43210"
+                value={phoneValue}
+                onChange={(e) => {
+                  setPhoneError("");
+                  setPhoneValue(e.target.value.replace(/\D/g, "").slice(0, 10));
+                }}
+                onKeyDown={(e) => e.key === "Enter" && phoneValue.length === 10 && handleSubmitPhone()}
+                autoFocus
+                style={{
+                  flex: 1, padding: ".65rem 1rem",
+                  background: "rgba(255,255,255,0.06)",
+                  border: `1.5px solid ${phoneError ? "#ef4444" : phoneValue.length === 10 ? "#06b6d4" : "rgba(255,255,255,0.1)"}`,
+                  borderRadius: 12,
+                  color: "#f8fafc", fontSize: "1.1rem",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  outline: "none", transition: "border-color .2s",
+                  letterSpacing: ".05em",
+                }}
+              />
+            </div>
 
-                <label style={{ display: "block", fontSize: ".72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "#64748b", marginBottom: ".5rem" }}>
-                  Mobile Number
-                </label>
-                <div style={{ display: "flex", gap: ".6rem", marginBottom: ".6rem" }}>
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: ".4rem",
-                    padding: ".65rem .85rem",
-                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 12, fontSize: ".85rem", color: "#94a3b8", whiteSpace: "nowrap",
-                    userSelect: "none",
-                  }}>
-                    🇮🇳 <span style={{ fontWeight: 700, color: "#cbd5e1" }}>+91</span>
-                  </div>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={10}
-                    placeholder="98765 43210"
-                    value={phoneValue}
-                    onChange={(e) => {
-                      setPhoneError("");
-                      setPhoneValue(e.target.value.replace(/\D/g, "").slice(0, 10));
-                    }}
-                    onKeyDown={(e) => e.key === "Enter" && phoneValue.length === 10 && handleSendOtp()}
-                    autoFocus
-                    style={{
-                      flex: 1, padding: ".65rem 1rem",
-                      background: "rgba(255,255,255,0.06)",
-                      border: `1.5px solid ${phoneError ? "#ef4444" : phoneValue.length === 10 ? "#06b6d4" : "rgba(255,255,255,0.1)"}`,
-                      borderRadius: 12,
-                      color: "#f8fafc", fontSize: "1.1rem",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      outline: "none", transition: "border-color .2s",
-                      letterSpacing: ".05em",
-                    }}
-                  />
-                </div>
-
-                {phoneError && (
-                  <div style={{ display: "flex", alignItems: "center", gap: ".4rem", color: "#f87171", fontSize: ".78rem", marginBottom: ".6rem" }}>
-                    <span>⚠</span> {phoneError}
-                  </div>
-                )}
-
-                <p style={{ fontSize: ".73rem", color: "#475569", marginBottom: "1.5rem", display: "flex", alignItems: "center", gap: ".35rem" }}>
-                  <span>🔒</span> Your number is encrypted and used only for identity verification.
-                </p>
-
-                <button
-                  onClick={handleSendOtp}
-                  disabled={phoneLoading || phoneValue.length !== 10}
-                  style={{
-                    width: "100%", padding: ".85rem 1rem",
-                    background: phoneValue.length === 10 && !phoneLoading
-                      ? "linear-gradient(135deg, #06b6d4 0%, #0284c7 100%)"
-                      : "rgba(6,182,212,0.2)",
-                    color: "#fff", border: "none", borderRadius: 14,
-                    fontSize: ".95rem", fontWeight: 700,
-                    cursor: phoneValue.length !== 10 || phoneLoading ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: ".55rem",
-                    transition: "all .22s", letterSpacing: ".01em",
-                    boxShadow: phoneValue.length === 10 && !phoneLoading ? "0 4px 20px rgba(6,182,212,0.3)" : "none",
-                    opacity: phoneValue.length !== 10 ? 0.55 : 1,
-                  }}
-                >
-                  {phoneLoading
-                    ? <><i className="fa fa-spinner fa-spin" /> Sending OTP...</>
-                    : <><i className="fa fa-paper-plane" /> Send OTP</>}
-                </button>
-              </>
+            {phoneError && (
+              <div style={{ display: "flex", alignItems: "center", gap: ".4rem", color: "#f87171", fontSize: ".78rem", marginBottom: ".6rem" }}>
+                <span>⚠</span> {phoneError}
+              </div>
             )}
 
-            {/* ── STEP 2: Enter OTP ── */}
-            {phoneStep === "verify" && (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: ".85rem", marginBottom: "1.25rem" }}>
-                  <div style={{
-                    width: 52, height: 52, borderRadius: 16, flexShrink: 0,
-                    background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.25)",
-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem",
-                  }}>{otpChannel === "email" ? "📧" : "💬"}</div>
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800 }}>Enter your OTP</h2>
-                    <p style={{ margin: ".2rem 0 0", fontSize: ".8rem", color: "#94a3b8" }}>
-                      {otpChannel === "email" ? (
-                        <>Sent to email&nbsp;<span style={{ color: "#06b6d4", fontWeight: 700 }}>{otpDeliveryHint}</span></>
-                      ) : (
-                        <>Sent to +91&nbsp;<span style={{ color: "#06b6d4", fontWeight: 700, fontFamily: "monospace" }}>{"*".repeat(6)}{phoneValue.slice(-4)}</span></>
-                      )}
-                    </p>
-                  </div>
-                </div>
+            <p style={{ fontSize: ".73rem", color: "#475569", marginBottom: "1.5rem", display: "flex", alignItems: "center", gap: ".35rem" }}>
+              <span>🔒</span> Must be a valid 10-digit Indian number starting with 6, 7, 8, or 9.
+            </p>
 
-                <p style={{ fontSize: ".83rem", color: "#cbd5e1", lineHeight: 1.6, marginBottom: "1.5rem" }}>
-                  Enter the <strong style={{ color: "#10b981" }}>6-digit OTP</strong> we just sent
-                  via {otpChannel === "email" ? "email" : "SMS"}. It expires in <strong>10 minutes</strong>.
-                </p>
-
-                <label style={{ display: "block", fontSize: ".72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "#64748b", marginBottom: ".5rem" }}>
-                  OTP Code
-                </label>
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="• • • • • •"
-                  value={otpValue}
-                  onChange={(e) => {
-                    setPhoneError("");
-                    setOtpValue(e.target.value.replace(/\D/g, "").slice(0, 6));
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && otpValue.length === 6 && handleVerifyOtp()}
-                  autoFocus
-                  style={{
-                    width: "100%", padding: ".75rem 1rem",
-                    background: "rgba(255,255,255,0.06)",
-                    border: `1.5px solid ${phoneError ? "#ef4444" : otpValue.length === 6 ? "#10b981" : "rgba(255,255,255,0.1)"}`,
-                    borderRadius: 12, boxSizing: "border-box",
-                    color: "#f8fafc", fontSize: "1.8rem",
-                    fontFamily: "'JetBrains Mono', monospace",
-                    textAlign: "center", letterSpacing: ".5em",
-                    outline: "none", marginBottom: ".6rem",
-                    transition: "border-color .2s",
-                  }}
-                />
-
-                {phoneError && (
-                  <div style={{ display: "flex", alignItems: "center", gap: ".4rem", color: "#f87171", fontSize: ".78rem", marginBottom: ".6rem" }}>
-                    <span>⚠</span> {phoneError}
-                  </div>
-                )}
-
-                {/* Countdown + resend */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-                  <span style={{ fontSize: ".78rem", color: "#64748b" }}>
-                    {countdown > 0
-                      ? <>Resend in <strong style={{ color: "#06b6d4" }}>{countdown}s</strong></>
-                      : <span style={{ color: "#94a3b8" }}>Didn't receive it?</span>}
-                  </span>
-                  <button
-                    onClick={handleResendOtp}
-                    disabled={countdown > 0 || phoneLoading}
-                    style={{
-                      background: "none", border: "none", padding: 0,
-                      color: countdown > 0 ? "#334155" : "#06b6d4",
-                      fontSize: ".78rem", fontWeight: 700,
-                      cursor: countdown > 0 || phoneLoading ? "not-allowed" : "pointer",
-                      textDecoration: countdown === 0 ? "underline" : "none",
-                    }}
-                  >
-                    Resend OTP
-                  </button>
-                </div>
-
-                <div style={{ display: "flex", gap: ".75rem" }}>
-                  <button
-                    onClick={() => { setPhoneStep("enter"); setPhoneError(""); setOtpValue(""); if (countdownRef.current) clearInterval(countdownRef.current); setCountdown(0); }}
-                    style={{
-                      flex: "0 0 auto", padding: ".82rem 1.1rem",
-                      background: "rgba(255,255,255,0.06)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 14, color: "#94a3b8",
-                      fontSize: ".88rem", fontWeight: 600, cursor: "pointer",
-                    }}
-                  >
-                    ← Back
-                  </button>
-                  <button
-                    onClick={handleVerifyOtp}
-                    disabled={phoneLoading || otpValue.length !== 6}
-                    style={{
-                      flex: 1, padding: ".85rem 1rem",
-                      background: otpValue.length === 6 && !phoneLoading
-                        ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-                        : "rgba(16,185,129,0.2)",
-                      color: "#fff", border: "none", borderRadius: 14,
-                      fontSize: ".95rem", fontWeight: 700,
-                      cursor: otpValue.length !== 6 || phoneLoading ? "not-allowed" : "pointer",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: ".55rem",
-                      transition: "all .22s",
-                      boxShadow: otpValue.length === 6 && !phoneLoading ? "0 4px 20px rgba(16,185,129,0.3)" : "none",
-                      opacity: otpValue.length !== 6 ? 0.55 : 1,
-                    }}
-                  >
-                    {phoneLoading
-                      ? <><i className="fa fa-spinner fa-spin" /> Verifying...</>
-                      : <><i className="fa fa-shield-halved" /> Verify &amp; Continue</>}
-                  </button>
-                </div>
-              </>
-            )}
+            <button
+              onClick={handleSubmitPhone}
+              disabled={phoneLoading || phoneValue.length !== 10}
+              style={{
+                width: "100%", padding: ".85rem 1rem",
+                background: phoneValue.length === 10 && !phoneLoading
+                  ? "linear-gradient(135deg, #06b6d4 0%, #0284c7 100%)"
+                  : "rgba(6,182,212,0.2)",
+                color: "#fff", border: "none", borderRadius: 14,
+                fontSize: ".95rem", fontWeight: 700,
+                cursor: phoneValue.length !== 10 || phoneLoading ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: ".55rem",
+                transition: "all .22s", letterSpacing: ".01em",
+                boxShadow: phoneValue.length === 10 && !phoneLoading ? "0 4px 20px rgba(6,182,212,0.3)" : "none",
+                opacity: phoneValue.length !== 10 ? 0.55 : 1,
+              }}
+            >
+              {phoneLoading
+                ? <><i className="fa fa-spinner fa-spin" /> Saving...</>
+                : <><i className="fa fa-arrow-right" /> Continue</>}
+            </button>
           </div>
         </div>
       )}

@@ -329,21 +329,13 @@ export const useAuthStore = create((set, get) => ({
      * Returns the server response { message, expires_in, cooldown }.
      * Throws on validation or rate-limit errors.
      */
-    sendPhoneOtp: async (phone) => {
-        const response = await api.post('/auth/send-phone-otp', { phone });
-        return response.data; // { message, expires_in, cooldown, channel, delivery_hint }
-    },
-
     /**
-     * Step 2 — verify the OTP and save the phone number.
-     *
-     * Works for users in ANY account_status (including pending_approval)
-     * because the backend endpoint only requires a valid Firebase token.
-     * After saving, patches the in-memory store so callers see the phone
-     * immediately without a full re-sync.
+     * Save the user's mobile number as contact info (no OTP required).
+     * Validates format on the backend (+91, 10-digit, starts with 6-9).
+     * Patches the in-memory store so callers see the phone immediately.
      */
-    submitPhone: async (phone, otp) => {
-        const response = await api.post('/auth/set-phone', { phone, otp });
+    submitPhone: async (phone) => {
+        const response = await api.post('/auth/set-phone', { phone });
         const current = get().user;
         if (current) {
             const updated = { ...current, phone: response.data.phone };
