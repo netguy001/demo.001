@@ -470,11 +470,10 @@ async def sync_user(
         # Update last login info
         user.updated_at = datetime.now(timezone.utc)
 
-        await db.commit()
-        await db.refresh(user)
-
+        await db.flush()  # assign IDs for new rows before session upsert
         await _upsert_user_session(db, user, request, token)
-        await db.commit()
+        await db.commit()  # single commit for user + portfolio + session
+        await db.refresh(user)
 
         # Send registration confirmation email for new non-admin users
         if is_new and not admin_allowlisted:

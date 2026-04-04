@@ -1,7 +1,7 @@
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import text
+from sqlalchemy import text, event
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB as PG_JSONB
 from sqlalchemy.exc import OperationalError
@@ -23,7 +23,11 @@ engine_kwargs = {
     "future": True,
 }
 
-if not settings.DATABASE_URL.startswith("sqlite"):
+if settings.DATABASE_URL.startswith("sqlite"):
+    # 30-second busy timeout so concurrent writers wait instead of immediately
+    # raising "database is locked".
+    engine_kwargs["connect_args"] = {"timeout": 30}
+else:
     engine_kwargs.update(
         {
             "pool_size": settings.DB_POOL_SIZE,
@@ -34,6 +38,17 @@ if not settings.DATABASE_URL.startswith("sqlite"):
     )
 
 engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
+
+if settings.DATABASE_URL.startswith("sqlite"):
+    # Enable WAL mode so readers never block writers and vice-versa.
+    # NORMAL synchronous is safe for demo workloads and far less contended.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, _rec):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -46,8 +61,12 @@ class Base(DeclarativeBase):
     pass
 
 
-async def _commit_with_retry(session: AsyncSession, retries: int = 3):
-    """Retry transient SQLite lock errors for write-heavy demo workloads."""
+async def _commit_with_retry(session: AsyncSession, retries: int = 5):
+    """Retry transient SQLite lock errors for write-heavy demo workloads.
+
+    WAL mode + busy_timeout=30 s on the connection handle most contention,
+    but keep this as a last-resort safety net with exponential back-off.
+    """
     for attempt in range(retries):
         try:
             await session.commit()
@@ -58,7 +77,7 @@ async def _commit_with_retry(session: AsyncSession, retries: int = 3):
                 "database is locked" in message or "database table is locked" in message
             )
             if locked and attempt < retries - 1:
-                await asyncio.sleep(0.05 * (attempt + 1))
+                await asyncio.sleep(0.1 * (2 ** attempt))  # 0.1 → 0.2 → 0.4 → 0.8 s
                 continue
             raise
 
