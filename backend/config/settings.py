@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     # Root admin email — has unrestricted access and can create/manage other admins.
     ROOT_ADMIN_EMAIL: str = "meganath1025@gmail.com"
 
+    # ── SMS (OTP delivery for phone verification) ────────────────────
+    # Provider: Fast2SMS (https://www.fast2sms.com)
+    # Leave blank during development — OTP will be printed to the server log.
+    # Set to your Fast2SMS API key in production for real SMS delivery.
+    FAST2SMS_API_KEY: str = ""
+
     # SMTP for email notifications (Gmail)
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587

@@ -165,10 +165,17 @@ class SyncRequest(BaseModel):
     auth_intent: Optional[str] = None
 
 
-class PhoneSubmitRequest(BaseModel):
-    """Phone number submission after registration."""
+class SendPhoneOTPRequest(BaseModel):
+    """Request to send an OTP to a mobile number."""
 
-    phone: str
+    phone: str  # 10-digit Indian mobile or +91XXXXXXXXXX
+
+
+class PhoneSubmitRequest(BaseModel):
+    """Phone number + OTP submission to verify and save."""
+
+    phone: str  # 10-digit Indian mobile or +91XXXXXXXXXX
+    otp: str    # 6-digit OTP received via SMS
 
 
 # --- Core Dependency: get_current_user ---
@@ -535,6 +542,77 @@ async def sync_user(
     }
 
 
+def _normalise_phone(raw: str):
+    """Validate and normalise Indian mobile number → '+91XXXXXXXXXX' or None."""
+    digits = re.sub(r"[\s\-\(\)]", "", raw.strip())
+    if digits.startswith("+91"):
+        digits = digits[3:]
+    elif digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    if not re.fullmatch(r"[6-9]\d{9}", digits):
+        return None
+    return f"+91{digits}"
+
+
+def _require_firebase_uid(credentials) -> str:
+    """Verify Firebase token and return firebase_uid; raises 401 on failure."""
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    claims = verify_id_token(credentials.credentials)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    uid = claims.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    return uid
+
+
+@router.post("/send-phone-otp")
+async def send_phone_otp(
+    req: SendPhoneOTPRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """
+    Step 1 — send a 6-digit OTP to the supplied Indian mobile number.
+
+    OTP is stored in Redis (TTL 10 min) and dispatched via Fast2SMS.
+    In development (FAST2SMS_API_KEY not set) the OTP is only logged
+    so the full flow can be tested without an SMS account.
+
+    Rate limits: max 5 sends per phone per hour; 60 s cooldown between sends.
+    """
+    from services.otp_service import generate_and_store_otp, send_otp_sms
+
+    firebase_uid = _require_firebase_uid(credentials)
+
+    normalised = _normalise_phone(req.phone)
+    if not normalised:
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter a valid 10-digit Indian mobile number (starts with 6–9).",
+        )
+
+    phone_10 = normalised[3:]
+
+    ok, otp, err = await generate_and_store_otp(firebase_uid, normalised)
+    if not ok:
+        raise HTTPException(status_code=429, detail=err)
+
+    sms_sent = await send_otp_sms(phone_10, otp)
+    if not sms_sent:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not send OTP SMS right now. Please try again shortly.",
+        )
+
+    logger.info("OTP dispatched to +91%s for uid=%s", phone_10, firebase_uid[:8])
+    return {
+        "message": f"OTP sent to +91{'*' * 6}{phone_10[-4:]}. Valid for 10 minutes.",
+        "expires_in": 600,
+        "cooldown":   60,
+    }
+
+
 @router.post("/set-phone")
 async def set_phone(
     req: PhoneSubmitRequest,
@@ -542,69 +620,42 @@ async def set_phone(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Set / update the mobile number for a user after registration.
+    Step 2 — verify the OTP and persist the phone number.
 
-    Intentionally does NOT enforce account_status so that users in
-    'pending_approval' state can complete their profile before the admin
-    approves them.  A valid Firebase ID token is the only auth requirement.
-
-    Validation: Indian mobile number — 10 digits, first digit 6-9.
-    Stored normalised as +91XXXXXXXXXX.
+    Does NOT enforce account_status so pending_approval users can complete
+    their profile.  Requires a valid Firebase token + the 6-digit OTP.
     """
-    if not credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    from services.otp_service import verify_otp
 
-    claims = verify_id_token(credentials.credentials)
-    if not claims:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    firebase_uid = _require_firebase_uid(credentials)
 
-    firebase_uid = claims.get("uid")
-    if not firebase_uid:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-
-    # ── Validate and normalise phone number ──────────────────────────────
-    raw = req.phone.strip()
-    # Strip common formatting characters
-    digits = re.sub(r"[\s\-\(\)]", "", raw)
-
-    # Strip country-code prefix if present
-    if digits.startswith("+91"):
-        digits = digits[3:]
-    elif digits.startswith("91") and len(digits) == 12:
-        digits = digits[2:]
-
-    if not re.fullmatch(r"[6-9]\d{9}", digits):
+    normalised = _normalise_phone(req.phone)
+    if not normalised:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Please enter a valid 10-digit Indian mobile number "
-                "(must start with 6, 7, 8, or 9)."
-            ),
+            detail="Please enter a valid 10-digit Indian mobile number (starts with 6–9).",
         )
 
-    normalised = f"+91{digits}"
+    otp_val = req.otp.strip()
+    if not re.fullmatch(r"\d{6}", otp_val):
+        raise HTTPException(status_code=400, detail="OTP must be exactly 6 digits.")
 
-    # ── Persist ──────────────────────────────────────────────────────────
+    verified, err = await verify_otp(firebase_uid, normalised, otp_val)
+    if not verified:
+        raise HTTPException(status_code=400, detail=err)
+
     result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
     user = result.scalar_one_or_none()
-
     if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found. Please register or sign in first.",
-        )
+        raise HTTPException(status_code=404, detail="User not found.")
 
     user.phone = normalised
     user.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
 
-    logger.info("Phone saved for user %s → %s", user.email, normalised)
-
-    return {
-        "message": "Mobile number saved successfully.",
-        "phone": user.phone,
-    }
+    logger.info("Phone verified & saved for %s → %s", user.email, normalised)
+    return {"message": "Mobile number verified and saved.", "phone": user.phone}
 
 
 @router.get("/me")

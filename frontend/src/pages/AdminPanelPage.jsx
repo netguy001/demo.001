@@ -439,6 +439,7 @@ export default function AdminPanelPage() {
     const [showAdminModal, setShowAdminModal] = useState(false);
     const [adminsList, setAdminsList] = useState([]);
     const [adminsLoading, setAdminsLoading] = useState(false);
+    const [auditOpen, setAuditOpen] = useState(false);
 
     const isRoot = adminLevel === 'root';
     const canManage = adminLevel === 'root' || adminLevel === 'manage';
@@ -503,17 +504,19 @@ export default function AdminPanelPage() {
     }, []);
 
     const refreshDashboard = useCallback(async () => {
-        const results = await Promise.allSettled([loadStats(), loadUsers(), loadAudit()]);
+        // Audit log is lazy — only refresh it if the section is currently open.
+        const toLoad = [loadStats(), loadUsers()];
+        if (auditOpen) toLoad.push(loadAudit());
+        const results = await Promise.allSettled(toLoad);
         const failedSections = [];
         if (results[0]?.status === 'rejected') failedSections.push({ name: 'stats', reason: results[0]?.reason });
         if (results[1]?.status === 'rejected') failedSections.push({ name: 'users', reason: results[1]?.reason });
-        if (results[2]?.status === 'rejected') failedSections.push({ name: 'audit log', reason: results[2]?.reason });
         if (failedSections.length) {
             const authFailed = failedSections.some((f) => [401, 403].includes(f?.reason?.response?.status));
             if (authFailed) { resetToVerifyStage(); return; }
             toast.error(`Failed to load: ${failedSections.map((f) => f.name).join(', ')}`);
         }
-    }, [loadAudit, loadStats, loadUsers, resetToVerifyStage]);
+    }, [auditOpen, loadAudit, loadStats, loadUsers, resetToVerifyStage]);
 
     const bootstrapAdmin = useCallback(async () => {
         if (!user || user.role !== 'admin') { setBootstrapping(false); return; }
@@ -804,48 +807,95 @@ export default function AdminPanelPage() {
                         </div>
                     </section>
 
-                    {/* Audit Log */}
-                    <section className="glass-card p-5">
-                        <div className="flex flex-wrap justify-between items-baseline gap-3 mb-4">
+                    {/* Audit Log — collapsible */}
+                    <section className="glass-card overflow-hidden">
+                        {/* ── Header / toggle ── */}
+                        <button
+                            className="w-full flex items-center justify-between p-5 text-left transition-colors"
+                            style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+                            onClick={() => {
+                                const opening = !auditOpen;
+                                setAuditOpen(opening);
+                                if (opening && !auditData.logs?.length) loadAudit();
+                            }}
+                        >
                             <div>
-                                <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Audit Log</h2>
+                                <div className="flex items-center gap-2">
+                                    <Activity size={16} style={{ color: 'var(--brand)' }} />
+                                    <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Audit Log</h2>
+                                    {auditData.total > 0 && (
+                                        <span className="text-xs font-mono px-2 py-0.5 rounded-full" style={{ background: 'var(--brand-glow)', color: 'var(--brand)' }}>
+                                            {auditData.total}
+                                        </span>
+                                    )}
+                                </div>
                                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Every admin action is recorded for accountability</p>
                             </div>
-                        </div>
-                        {auditLoading ? (
-                            <div className="flex items-center gap-2 text-sm py-4" style={{ color: 'var(--text-muted)' }}><Loader2 size={14} className="animate-spin" /> Loading audit log...</div>
-                        ) : auditData.logs?.length ? (
-                            <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
-                                <table className="w-full" style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 680 }}>
-                                    <colgroup>
-                                        <col style={{ width: '22%' }} /><col style={{ width: '16%' }} /><col style={{ width: '20%' }} />
-                                        <col style={{ width: '26%' }} /><col style={{ width: '16%' }} />
-                                    </colgroup>
-                                    <thead>
-                                        <tr style={{ background: 'var(--bg-muted)' }}>
-                                            {['Time', 'Admin', 'Action', 'Target', 'IP'].map((h) => (
-                                                <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider"
-                                                    style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>{h}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {auditData.logs.map((log) => (
-                                            <tr key={log.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                                <td className="px-4 py-3 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{safeDate(log.created_at)}</td>
-                                                <td className="px-4 py-3 text-sm truncate">{log.admin_name || 'Unknown'}</td>
-                                                <td className="px-4 py-3">
-                                                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap"
-                                                        style={{ background: 'var(--brand-glow)', color: 'var(--brand)' }}>{log.action}</span>
-                                                </td>
-                                                <td className="px-4 py-3 text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{log.target_user_name || '—'}</td>
-                                                <td className="px-4 py-3 text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{log.ip_address || '—'}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                                {auditOpen && (
+                                    <button
+                                        className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full"
+                                        style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                                        onClick={(e) => { e.stopPropagation(); loadAudit(); }}
+                                    >
+                                        <RefreshCw size={11} /> Refresh
+                                    </button>
+                                )}
+                                <div style={{
+                                    width: 28, height: 28, borderRadius: 8,
+                                    background: 'var(--bg-muted)', border: '1px solid var(--border)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    transition: 'transform .22s',
+                                    transform: auditOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                                }}>
+                                    <ChevronLeft size={16} style={{ color: 'var(--text-muted)', transform: 'rotate(-90deg)' }} />
+                                </div>
                             </div>
-                        ) : <div className="text-sm py-4" style={{ color: 'var(--text-muted)' }}>No audit entries found.</div>}
+                        </button>
+
+                        {/* ── Body (collapsed/expanded) ── */}
+                        {auditOpen && (
+                            <div style={{ borderTop: '1px solid var(--border)' }} className="p-5 pt-4">
+                                {auditLoading ? (
+                                    <div className="flex items-center gap-2 text-sm py-4" style={{ color: 'var(--text-muted)' }}>
+                                        <Loader2 size={14} className="animate-spin" /> Loading audit log...
+                                    </div>
+                                ) : auditData.logs?.length ? (
+                                    <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
+                                        <table className="w-full" style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 680 }}>
+                                            <colgroup>
+                                                <col style={{ width: '22%' }} /><col style={{ width: '16%' }} /><col style={{ width: '20%' }} />
+                                                <col style={{ width: '26%' }} /><col style={{ width: '16%' }} />
+                                            </colgroup>
+                                            <thead>
+                                                <tr style={{ background: 'var(--bg-muted)' }}>
+                                                    {['Time', 'Admin', 'Action', 'Target', 'IP'].map((h) => (
+                                                        <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider"
+                                                            style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {auditData.logs.map((log) => (
+                                                    <tr key={log.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border)' }}>
+                                                        <td className="px-4 py-3 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{safeDate(log.created_at)}</td>
+                                                        <td className="px-4 py-3 text-sm truncate">{log.admin_name || 'Unknown'}</td>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap"
+                                                                style={{ background: 'var(--brand-glow)', color: 'var(--brand)' }}>{log.action}</span>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{log.target_user_name || '—'}</td>
+                                                        <td className="px-4 py-3 text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{log.ip_address || '—'}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <div className="text-sm py-4" style={{ color: 'var(--text-muted)' }}>No audit entries found.</div>
+                                )}
+                            </div>
+                        )}
                     </section>
                 </div>
             )}
