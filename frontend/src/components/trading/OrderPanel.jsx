@@ -98,10 +98,8 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
     };
 
     return (
-        <div className={cn('flex flex-col h-full w-full max-w-[300px] bg-surface-900', !isFloating && 'border-l border-edge/10')}>
+        <div className={cn('flex flex-col w-full max-w-[300px] bg-surface-900', isFloating ? 'h-auto' : 'h-full', !isFloating && 'border-l border-edge/10')}>
             <div className="px-3 py-2.5 border-b border-edge/5">
-                <h3 className="section-title text-xs mb-2">Order Panel</h3>
-
                 <div className="flex gap-1.5">
                     <button
                         onClick={() => setSide(ORDER_SIDE.BUY)}
@@ -128,7 +126,7 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-3 py-2.5 space-y-3">
+            <div className={cn('px-3 py-2.5 space-y-3', !isFloating && 'flex-1 overflow-y-auto')}>
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="metric-label block mb-1">Symbol</label>
@@ -244,40 +242,37 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                     </div>
                 )}
 
-                <div className="rounded-xl bg-surface-800/40 border border-edge/5 p-2.5 space-y-2">
-                    <div className="flex justify-between text-xs">
+                <div className="border-t border-edge/5 pt-2">
+                    <div className="rounded-xl bg-surface-800/40 border border-edge/5 p-2">
+                    <div className="h-6 flex items-center justify-between text-xs">
                         <span className="text-gray-500">Est. Value</span>
-                        <span className="font-price text-heading font-semibold tabular-nums">{formatCurrency(totalCost)}</span>
+                        <span className="font-price text-heading font-semibold tabular-nums text-right">{formatCurrency(totalCost)}</span>
                     </div>
-                    <div className="flex justify-between text-xs">
+                    <div className="h-6 flex items-center justify-between text-xs">
                         <span className="text-gray-500">Qty × Price</span>
-                        <span className="font-price text-gray-400 tabular-nums">
+                        <span className="font-price text-heading tabular-nums text-right">
                             {form.quantity || 0} × {form.order_type === ORDER_TYPE.LIMIT && form.price ? `₹${form.price}` : `₹${formatPrice(currentPrice)}`}
                         </span>
                     </div>
-                    <div className="flex justify-between text-xs">
+                    <div className="h-6 flex items-center justify-between text-xs">
                         <span className="text-gray-500">Product</span>
-                        <span className={cn(
-                            'font-semibold text-xs px-1.5 py-0.5 rounded',
-                            isDelivery
-                                ? 'bg-blue-500/10 text-blue-400'
-                                : 'bg-amber-500/10 text-amber-400'
-                        )}>
+                        <span className="font-semibold text-amber-400 text-right">
                             {form.product_type} ({modeInfo.label})
                         </span>
                     </div>
                     {isIntraday && totalCost > 0 && (
-                        <div className="flex justify-between text-xs border-t border-edge/5 pt-2 mt-1">
+                        <div className="h-6 flex items-center justify-between text-xs">
                             <span className="text-gray-500">Margin Required (5×)</span>
-                            <span className="font-price text-amber-400 font-medium tabular-nums">
+                            <span className="font-price text-amber-400 font-medium tabular-nums text-right">
                                 {formatCurrency(marginRequired)}
                             </span>
                         </div>
                     )}
                 </div>
+                </div>
             </div>
 
-            <div className="sticky bottom-0 px-3 py-2.5 border-t border-edge/5 bg-surface-900">
+            <div className={cn('px-3 pt-2 pb-2.5 border-t border-edge/5 bg-surface-900', !isFloating && 'sticky bottom-0')}>
                 {!isBuy && isDelivery && !canSell && (
                     <div className="mb-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
                         <span className="font-semibold">No holdings found.</span> In Delivery (CNC) mode, you can only sell shares you already own.
