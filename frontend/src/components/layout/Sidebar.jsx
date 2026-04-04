@@ -193,47 +193,55 @@ export default function Sidebar({ collapsed, onToggle }) {
         {/* ── Brand row ── */}
         <div
           className={cn(
-            "relative flex-shrink-0 h-20 transition-all duration-300",
+            "relative flex-shrink-0 transition-all duration-300",
             collapsed
-              ? "px-2 py-2"
-              : "px-4 py-2",
+              ? "h-[104px] px-2 pt-2 pb-3 flex flex-col items-center gap-2"
+              : "h-20 px-4 py-2",
           )}
         >
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={cn(
-              "absolute top-2 p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300",
-              collapsed ? "left-1/2 -translate-x-1/2" : "right-2"
-            )}
-          >
-            {collapsed ? <Menu className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-          </button>
+          {collapsed ? (
+            <>
+              <button
+                type="button"
+                onClick={onToggle}
+                aria-label="Expand sidebar"
+                title="Expand sidebar"
+                className="p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
 
-          <div className={cn(
-            "flex items-center w-full h-full",
-            collapsed ? "justify-center pt-5" : "justify-start pr-10"
-          )}>
-            {collapsed ? (
-              <a href="https://www.alphasync.app/">
+              <a href="https://www.alphasync.app/" className="inline-flex items-center justify-center">
                 <img
                   src="/logo1.png"
                   alt="AlphaSync"
                   className="h-9 w-9 object-contain flex-shrink-0 transition-all duration-300 logo-light-adapt"
                 />
               </a>
-            ) : (
-              <a href="https://www.alphasync.app/" className="block min-w-0 flex-1">
-                <img
-                  src="/logo-full.png"
-                  alt="AlphaSync"
-                  className="h-14 max-w-[180px] object-contain object-left transition-all duration-300 logo-light-adapt"
-                />
-              </a>
-            )}
-          </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onToggle}
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+                className="absolute right-2 top-2 p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center w-full h-full justify-start pr-10">
+                <a href="https://www.alphasync.app/" className="block min-w-0 flex-1">
+                  <img
+                    src="/logo-full.png"
+                    alt="AlphaSync"
+                    className="h-14 max-w-[180px] object-contain object-left transition-all duration-300 logo-light-adapt"
+                  />
+                </a>
+              </div>
+            </>
+          )}
           {/* Tagline — only visible when collapsed (expanded version is inline with logo) */}
         </div>
 
@@ -241,17 +249,25 @@ export default function Sidebar({ collapsed, onToggle }) {
         <div className="mx-3 h-px bg-edge/8" />
 
         {/* ── Navigation ── */}
-        <nav className="flex-1 px-2.5 overflow-y-auto overflow-x-hidden">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.label}>
-              <SectionLabel label={section.label} collapsed={collapsed} />
-              <div className="space-y-0.5">
-                {section.items.map((item) => (
-                  <SidebarItem key={item.to} {...item} collapsed={collapsed} />
-                ))}
-              </div>
+        <nav className={cn("flex-1 px-2.5 overflow-y-auto overflow-x-hidden", collapsed && "pt-2") }>
+          {collapsed ? (
+            <div className="space-y-1.5">
+              {NAV_SECTIONS.flatMap((section) => section.items).map((item) => (
+                <SidebarItem key={item.to} {...item} collapsed={collapsed} />
+              ))}
             </div>
-          ))}
+          ) : (
+            NAV_SECTIONS.map((section) => (
+              <div key={section.label}>
+                <SectionLabel label={section.label} collapsed={collapsed} />
+                <div className="space-y-0.5">
+                  {section.items.map((item) => (
+                    <SidebarItem key={item.to} {...item} collapsed={collapsed} />
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </nav>
 
         {/* ── Divider ── */}
