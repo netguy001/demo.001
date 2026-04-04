@@ -7,74 +7,6 @@ import { formatCurrency, formatPrice, cleanSymbol } from '../../utils/formatters
 import { ORDER_SIDE, ORDER_TYPE, TRADING_MODE, TRADING_MODE_INFO } from '../../utils/constants';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 
-function ThemedSelect({ value, options, onChange, className = '' }) {
-    const [open, setOpen] = useState(false);
-    const rootRef = useRef(null);
-
-    useEffect(() => {
-        if (!open) return;
-        const onDocClick = (e) => {
-            if (!rootRef.current?.contains(e.target)) setOpen(false);
-        };
-        const onEsc = (e) => {
-            if (e.key === 'Escape') setOpen(false);
-        };
-        document.addEventListener('mousedown', onDocClick);
-        document.addEventListener('keydown', onEsc);
-        return () => {
-            document.removeEventListener('mousedown', onDocClick);
-            document.removeEventListener('keydown', onEsc);
-        };
-    }, [open]);
-
-    const selected = options.find((o) => o.value === value) || options[0];
-
-    return (
-        <div ref={rootRef} className={cn('relative', className)}>
-            <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                className="h-11 w-full bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm text-heading focus:outline-none focus:border-primary-500/30 flex items-center justify-between gap-2"
-                aria-haspopup="listbox"
-                aria-expanded={open}
-            >
-                <span className="truncate">{selected?.label}</span>
-                <svg className={cn('w-3.5 h-3.5 text-gray-500 transition-transform', open && 'rotate-180')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-            </button>
-
-            {open && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-edge/10 bg-surface-800 shadow-2xl shadow-black/30 overflow-hidden">
-                    {options.map((opt) => {
-                        const active = opt.value === value;
-                        return (
-                            <button
-                                type="button"
-                                key={opt.value}
-                                onClick={() => {
-                                    onChange(opt.value);
-                                    setOpen(false);
-                                }}
-                                className={cn(
-                                    'w-full px-2.5 py-2 text-left text-sm transition-colors',
-                                    active
-                                        ? 'bg-primary-500/15 text-primary-600'
-                                        : 'text-heading hover:bg-surface-700/70'
-                                )}
-                                role="option"
-                                aria-selected={active}
-                            >
-                                {opt.label}
-                            </button>
-                        );
-                    })}
-                </div>
-            )}
-        </div>
-    );
-}
-
 /**
  * Order panel — buy/sell form with confirmation modal.
  *
@@ -266,28 +198,28 @@ export default function OrderPanel({ symbol, currentPrice = 0, isTerminalFocused
                 <div className="grid grid-cols-2 gap-2">
                     <div>
                         <label className="metric-label block mb-1">Trading type</label>
-                        <ThemedSelect
+                        <select
                             value={selectedTradingProduct}
-                            onChange={handleTradingTypeChange}
-                            options={[
-                                { value: 'MIS', label: 'Intraday (MIS)' },
-                                { value: 'CNC', label: 'Delivery (CNC)' },
-                                { value: 'NRML', label: 'Normal (NRML)' },
-                            ]}
-                        />
+                            onChange={(e) => handleTradingTypeChange(e.target.value)}
+                            className="h-11 w-full bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm text-heading focus:outline-none focus:border-primary-500/30"
+                        >
+                            <option value="MIS">Intraday (MIS)</option>
+                            <option value="CNC">Delivery (CNC)</option>
+                            <option value="NRML">Normal (NRML)</option>
+                        </select>
                     </div>
                     <div>
                         <label className="metric-label block mb-1">Order type</label>
-                        <ThemedSelect
+                        <select
                             value={form.order_type}
-                            onChange={handleOrderTypeChange}
-                            options={[
-                                { value: 'MARKET', label: 'Market' },
-                                { value: 'LIMIT', label: 'Limit' },
-                                { value: 'SL', label: 'SL' },
-                                { value: 'SL-M', label: 'SL-M' },
-                            ]}
-                        />
+                            onChange={(e) => handleOrderTypeChange(e.target.value)}
+                            className="h-11 w-full bg-surface-800/60 border border-edge/10 rounded-lg px-2.5 text-sm text-heading focus:outline-none focus:border-primary-500/30"
+                        >
+                            <option value="MARKET">Market</option>
+                            <option value="LIMIT">Limit</option>
+                            <option value="SL">SL</option>
+                            <option value="SL-M">SL-M</option>
+                        </select>
                     </div>
                 </div>
 
