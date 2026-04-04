@@ -323,4 +323,24 @@ export const useAuthStore = create((set, get) => ({
         localStorage.setItem('alphasync_user', JSON.stringify(updated));
         set({ user: updated });
     },
+
+    /**
+     * Submit and save mobile number after registration.
+     *
+     * Works for users in ANY account_status (including pending_approval)
+     * because the backend endpoint only requires a valid Firebase token.
+     * After saving, updates the in-memory user store so callers can read
+     * the phone immediately without re-syncing.
+     */
+    submitPhone: async (phone) => {
+        const response = await api.post('/auth/set-phone', { phone });
+        // Patch phone into the store so the UI reflects it instantly
+        const current = get().user;
+        if (current) {
+            const updated = { ...current, phone: response.data.phone };
+            localStorage.setItem('alphasync_user', JSON.stringify(updated));
+            set({ user: updated });
+        }
+        return response.data;
+    },
 }));

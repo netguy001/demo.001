@@ -48,10 +48,18 @@ export default function LoginPage() {
   const [showLoginPass, setShowLoginPass] = useState(false);
   const [showRegPass, setShowRegPass] = useState(false);
 
+  // ── Phone collection modal state ─────────────────────────────────────
+  const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [pendingProfile, setPendingProfile] = useState(null);
+  const [phoneValue, setPhoneValue] = useState("");
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [phoneError, setPhoneError] = useState("");
+
   const loginWithEmail = useAuthStore((s) => s.loginWithEmail);
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
   const registerWithEmail = useAuthStore((s) => s.registerWithEmail);
   const resendVerification = useAuthStore((s) => s.resendVerification);
+  const submitPhone = useAuthStore((s) => s.submitPhone);
   const existingUser = useAuthStore((s) => s.user);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -82,6 +90,44 @@ export default function LoginPage() {
     }
   };
 
+  // ── Phone gate: show modal if user has no phone, otherwise route ─────
+  const handleAuthSuccess = (profile) => {
+    if (!profile?.phone) {
+      setPendingProfile(profile);
+      setPhoneValue("");
+      setPhoneError("");
+      setShowPhoneModal(true);
+    } else {
+      routeByAccountStatus(profile);
+    }
+  };
+
+  const handlePhoneSubmit = async () => {
+    const raw = phoneValue.trim();
+    // Client-side pre-validation (matches backend rules)
+    const digits = raw.replace(/[\s\-()+]/g, "").replace(/^91(\d{10})$/, "$1");
+    const clean = digits.startsWith("+91") ? digits.slice(3) : digits;
+    if (!/^[6-9]\d{9}$/.test(clean)) {
+      setPhoneError("Enter a valid 10-digit Indian mobile number (starts with 6–9).");
+      return;
+    }
+    setPhoneError("");
+    setPhoneLoading(true);
+    try {
+      await submitPhone(raw);
+      setShowPhoneModal(false);
+      routeByAccountStatus(pendingProfile);
+    } catch (err) {
+      const msg =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Could not save mobile number. Please try again.";
+      setPhoneError(msg);
+    } finally {
+      setPhoneLoading(false);
+    }
+  };
+
   // No auto-redirect — let user interact with login page even if session exists
 
   const handleLogin = async (e) => {
@@ -94,7 +140,7 @@ export default function LoginPage() {
       } else {
         toast.success("Welcome back!");
       }
-      routeByAccountStatus(result?.user);
+      handleAuthSuccess(result?.user);
     } catch (err) {
       const code = err.code;
       if (code === "auth/email-not-verified") {
@@ -160,7 +206,7 @@ export default function LoginPage() {
       } else {
         toast.success(`Welcome back, ${signedInEmail}!`);
       }
-      routeByAccountStatus(result?.user);
+      handleAuthSuccess(result?.user);
     } catch (err) {
       if (err.response?.status === 404) {
         toast.error("Account not found. Please create an account first.");
@@ -185,7 +231,7 @@ export default function LoginPage() {
       } else {
         toast.success(result.isNew ? `Welcome to AlphaSync, ${signedInEmail}!` : `Welcome back, ${signedInEmail}!`);
       }
-      routeByAccountStatus(result?.user);
+      handleAuthSuccess(result?.user);
     } catch (err) {
       if (err.code !== "auth/popup-closed-by-user") {
         toast.error(err.message || "Google sign-up failed");
@@ -209,6 +255,119 @@ export default function LoginPage() {
   return (
     <div className="auth-page-shell">
       <style dangerouslySetInnerHTML={{ __html: AUTH_STYLES }} />
+
+      {/* ── Phone Collection Modal ────────────────────────────────── */}
+      {showPhoneModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
+          padding: "1rem",
+        }}>
+          <div style={{
+            background: "var(--bg-surface, #1e293b)",
+            border: "1px solid var(--border, rgba(255,255,255,0.1))",
+            borderRadius: "20px",
+            padding: "2rem",
+            width: "100%",
+            maxWidth: "420px",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+            color: "var(--text-primary, #f8fafc)",
+          }}>
+            {/* Icon + Title */}
+            <div style={{ display: "flex", alignItems: "center", gap: ".75rem", marginBottom: "1.25rem" }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: 14,
+                background: "rgba(6,182,212,.15)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "1.4rem",
+              }}>📱</div>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700 }}>Verify your mobile number</h2>
+                <p style={{ margin: 0, fontSize: ".82rem", color: "var(--text-muted, #94a3b8)", marginTop: ".2rem" }}>
+                  Required once — skipped on future sign-ins
+                </p>
+              </div>
+            </div>
+
+            <p style={{ fontSize: ".85rem", color: "var(--text-secondary, #cbd5e1)", marginBottom: "1.25rem", lineHeight: 1.6 }}>
+              Please enter your <strong>10-digit Indian mobile number</strong>. This is collected once to
+              verify your identity and will be visible to admins for account management.
+            </p>
+
+            {/* Input */}
+            <label style={{ display: "block", fontSize: ".78rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-muted, #94a3b8)", marginBottom: ".4rem" }}>
+              Mobile Number
+            </label>
+            <div style={{ display: "flex", gap: ".5rem", marginBottom: ".75rem" }}>
+              <span style={{
+                display: "flex", alignItems: "center", padding: "0 .75rem",
+                background: "rgba(255,255,255,.06)", border: "1px solid var(--border, rgba(255,255,255,.1))",
+                borderRadius: 10, fontSize: ".85rem", color: "var(--text-secondary, #cbd5e1)",
+                whiteSpace: "nowrap",
+              }}>🇮🇳 +91</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="9876543210"
+                value={phoneValue}
+                onChange={(e) => {
+                  setPhoneError("");
+                  // Only allow digits, max 10
+                  const v = e.target.value.replace(/\D/g, "").slice(0, 10);
+                  setPhoneValue(v);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handlePhoneSubmit()}
+                style={{
+                  flex: 1, padding: ".65rem .9rem",
+                  background: "rgba(255,255,255,.06)",
+                  border: `1px solid ${phoneError ? "#ef4444" : "var(--border, rgba(255,255,255,.1))"}`,
+                  borderRadius: 10,
+                  color: "var(--text-primary, #f8fafc)",
+                  fontSize: "1rem", fontFamily: "monospace",
+                  outline: "none",
+                }}
+                autoFocus
+              />
+            </div>
+
+            {phoneError && (
+              <p style={{ color: "#ef4444", fontSize: ".8rem", marginBottom: ".75rem" }}>
+                {phoneError}
+              </p>
+            )}
+
+            <p style={{ fontSize: ".75rem", color: "var(--text-muted, #94a3b8)", marginBottom: "1.25rem" }}>
+              <i className="fa fa-lock" style={{ marginRight: ".35rem" }}></i>
+              Your number is stored securely and used only for account verification.
+            </p>
+
+            {/* Submit */}
+            <button
+              onClick={handlePhoneSubmit}
+              disabled={phoneLoading || phoneValue.length < 10}
+              style={{
+                width: "100%", padding: ".75rem",
+                background: phoneLoading || phoneValue.length < 10
+                  ? "rgba(6,182,212,.25)"
+                  : "linear-gradient(135deg, #06b6d4, #0284c7)",
+                color: "#fff", border: "none", borderRadius: 12,
+                fontSize: ".95rem", fontWeight: 700, cursor: phoneLoading || phoneValue.length < 10 ? "not-allowed" : "pointer",
+                opacity: phoneLoading || phoneValue.length < 10 ? 0.65 : 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: ".5rem",
+                transition: "all .2s",
+              }}
+            >
+              {phoneLoading ? (
+                <><i className="fa fa-spinner fa-spin"></i> Saving...</>
+              ) : (
+                <><i className="fa fa-check-circle"></i> Confirm &amp; Continue</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* NAV */}
       <nav className="auth-nav">

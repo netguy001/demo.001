@@ -32,9 +32,14 @@ _template_env = Environment(
 
 
 async def _send_smtp(to: str, subject: str, html_body: str) -> bool:
-    """Send an email via SMTP. Returns True on success."""
+    """Send an email via SMTP. Returns True on success.
+
+    Supports two modes depending on SMTP_USE_TLS:
+      - False (default): port 587 with STARTTLS  (Gmail standard)
+      - True:            port 465 with implicit SSL
+    """
     if not settings.SMTP_HOST or not settings.SMTP_USER:
-        logger.warning(f"SMTP not configured — skipping email to {to}: {subject}")
+        logger.warning("SMTP not configured — skipping email to %s: %s", to, subject)
         return False
 
     try:
@@ -46,19 +51,32 @@ async def _send_smtp(to: str, subject: str, html_body: str) -> bool:
         msg["Subject"] = subject
         msg.attach(MIMEText(html_body, "html"))
 
-        await aiosmtplib.send(
-            msg,
+        smtp_kwargs = dict(
             hostname=settings.SMTP_HOST,
             port=settings.SMTP_PORT,
             username=settings.SMTP_USER,
             password=settings.SMTP_PASSWORD,
-            use_tls=settings.SMTP_USE_TLS,
-            start_tls=not settings.SMTP_USE_TLS,
+            timeout=30,
         )
-        logger.info(f"Email sent to {to}: {subject}")
+
+        if settings.SMTP_USE_TLS:
+            # Port 465 — implicit SSL/TLS
+            smtp_kwargs["use_tls"] = True
+        else:
+            # Port 587 — STARTTLS (recommended for Gmail app-passwords)
+            smtp_kwargs["start_tls"] = True
+
+        await aiosmtplib.send(msg, **smtp_kwargs)
+        logger.info("Email sent to %s: %s", to, subject)
         return True
     except Exception as e:
-        logger.error(f"Failed to send email to {to}: {e}")
+        logger.error(
+            "Failed to send email to %s [%s]: %s",
+            to,
+            subject,
+            e,
+            exc_info=True,
+        )
         return False
 
 

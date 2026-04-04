@@ -13,6 +13,7 @@ Flow:
 
 import logging
 import hashlib
+import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -162,6 +163,12 @@ class SyncRequest(BaseModel):
 
     username: Optional[str] = None
     auth_intent: Optional[str] = None
+
+
+class PhoneSubmitRequest(BaseModel):
+    """Phone number submission after registration."""
+
+    phone: str
 
 
 # --- Core Dependency: get_current_user ---
@@ -525,6 +532,78 @@ async def sync_user(
             "auth_provider": user.auth_provider,
             "account_status": getattr(user, "account_status", "active"),
         },
+    }
+
+
+@router.post("/set-phone")
+async def set_phone(
+    req: PhoneSubmitRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Set / update the mobile number for a user after registration.
+
+    Intentionally does NOT enforce account_status so that users in
+    'pending_approval' state can complete their profile before the admin
+    approves them.  A valid Firebase ID token is the only auth requirement.
+
+    Validation: Indian mobile number — 10 digits, first digit 6-9.
+    Stored normalised as +91XXXXXXXXXX.
+    """
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    claims = verify_id_token(credentials.credentials)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    firebase_uid = claims.get("uid")
+    if not firebase_uid:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    # ── Validate and normalise phone number ──────────────────────────────
+    raw = req.phone.strip()
+    # Strip common formatting characters
+    digits = re.sub(r"[\s\-\(\)]", "", raw)
+
+    # Strip country-code prefix if present
+    if digits.startswith("+91"):
+        digits = digits[3:]
+    elif digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+
+    if not re.fullmatch(r"[6-9]\d{9}", digits):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Please enter a valid 10-digit Indian mobile number "
+                "(must start with 6, 7, 8, or 9)."
+            ),
+        )
+
+    normalised = f"+91{digits}"
+
+    # ── Persist ──────────────────────────────────────────────────────────
+    result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found. Please register or sign in first.",
+        )
+
+    user.phone = normalised
+    user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(user)
+
+    logger.info("Phone saved for user %s → %s", user.email, normalised)
+
+    return {
+        "message": "Mobile number saved successfully.",
+        "phone": user.phone,
     }
 
 

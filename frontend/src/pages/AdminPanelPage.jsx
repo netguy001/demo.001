@@ -102,20 +102,50 @@ function ManageUserModal({ user: selectedUser, userDetail, detailLoading, action
                         style={{ color: 'var(--text-muted)' }} onClick={onClose}><X size={18} /></button>
                 </div>
                 <div className="p-5 flex flex-col gap-5">
-                    <div className="grid grid-cols-2 gap-3">
-                        {[
-                            { label: 'Status', content: <StatusPill status={selectedUser.account_status} /> },
-                            { label: 'Active', content: selectedUser.is_active
-                                ? <span className="flex items-center gap-1.5 font-semibold" style={{ color: '#10b981' }}><CheckCircle2 size={14} /> Yes</span>
-                                : <span className="flex items-center gap-1.5 font-semibold" style={{ color: '#ef4444' }}><XCircle size={14} /> No</span> },
-                            { label: 'Access Expires', content: <span className="text-sm font-mono">{safeDate(selectedUser.access_expires_at)}</span> },
-                            { label: 'Approved At', content: <span className="text-sm font-mono">{safeDate(selectedUser.approved_at)}</span> },
-                        ].map(({ label, content }) => (
-                            <div key={label} className="p-3 rounded-xl" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
-                                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>{label}</div>
-                                {content}
-                            </div>
-                        ))}
+                    {/* ── Identity ── */}
+                    <div>
+                        <div className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--text-muted)' }}>Identity &amp; Contact</div>
+                        <div className="grid grid-cols-2 gap-3">
+                            {[
+                                { label: 'Full Name', content: <span className="text-sm font-medium">{selectedUser.full_name || '—'}</span> },
+                                { label: 'Username', content: <span className="text-sm font-mono">{selectedUser.username || '—'}</span> },
+                                { label: 'Email / Gmail', content: <span className="text-sm break-all">{selectedUser.email}</span> },
+                                { label: 'Mobile Number', content: selectedUser.phone
+                                    ? <span className="text-sm font-mono font-semibold" style={{ color: '#10b981' }}>{selectedUser.phone}</span>
+                                    : <span className="text-sm font-semibold" style={{ color: '#f59e0b' }}>⚠ Not set</span> },
+                                { label: 'Auth Provider', content: <span className="text-sm">{selectedUser.auth_provider === 'google.com' ? '🔵 Google OAuth' : selectedUser.auth_provider === 'password' ? '🔑 Email / Password' : (selectedUser.auth_provider || '—')}</span> },
+                                { label: 'Email Verified', content: selectedUser.is_verified
+                                    ? <span className="flex items-center gap-1 font-semibold text-sm" style={{ color: '#10b981' }}><CheckCircle2 size={13} /> Verified</span>
+                                    : <span className="flex items-center gap-1 font-semibold text-sm" style={{ color: '#ef4444' }}><XCircle size={13} /> Unverified</span> },
+                            ].map(({ label, content }) => (
+                                <div key={label} className="p-3 rounded-xl" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
+                                    <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
+                                    {content}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* ── Account Status ── */}
+                    <div>
+                        <div className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--text-muted)' }}>Account Status &amp; Dates</div>
+                        <div className="grid grid-cols-2 gap-3">
+                            {[
+                                { label: 'Status', content: <StatusPill status={selectedUser.account_status} /> },
+                                { label: 'Active', content: selectedUser.is_active
+                                    ? <span className="flex items-center gap-1.5 font-semibold text-sm" style={{ color: '#10b981' }}><CheckCircle2 size={14} /> Yes</span>
+                                    : <span className="flex items-center gap-1.5 font-semibold text-sm" style={{ color: '#ef4444' }}><XCircle size={14} /> No</span> },
+                                { label: 'Registered On', content: <span className="text-xs font-mono">{safeDate(selectedUser.created_at)}</span> },
+                                { label: 'Last Updated', content: <span className="text-xs font-mono">{safeDate(selectedUser.updated_at)}</span> },
+                                { label: 'Access Expires', content: <span className="text-xs font-mono">{safeDate(selectedUser.access_expires_at)}</span> },
+                                { label: 'Approved At', content: <span className="text-xs font-mono">{safeDate(selectedUser.approved_at)}</span> },
+                            ].map(({ label, content }) => (
+                                <div key={label} className="p-3 rounded-xl" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
+                                    <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
+                                    {content}
+                                </div>
+                            ))}
+                        </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
@@ -715,40 +745,45 @@ export default function AdminPanelPage() {
                             </button>
                         </div>
                         <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
-                            <table className="w-full" style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 720 }}>
+                            <table className="w-full" style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 1020 }}>
                                 <colgroup>
-                                    <col style={{ width: '25%' }} /><col style={{ width: '16%' }} /><col style={{ width: '18%' }} />
-                                    <col style={{ width: '8%' }} /><col style={{ width: '20%' }} /><col style={{ width: '13%' }} />
+                                    <col style={{ width: '18%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} />
+                                    <col style={{ width: '14%' }} /><col style={{ width: '10%' }} /><col style={{ width: '14%' }} />
+                                    <col style={{ width: '12%' }} /><col style={{ width: '8%' }} />
                                 </colgroup>
                                 <thead>
                                     <tr style={{ background: 'var(--bg-muted)' }}>
-                                        {['Email', 'Username', 'Status', 'Active', 'Expires', 'Action'].map((h) => (
-                                            <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider"
+                                        {['Email', 'Full Name', 'Mobile', 'Status', 'Provider', 'Registered', 'Expires', 'Action'].map((h) => (
+                                            <th key={h} className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wider"
                                                 style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                                         ))}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {usersData.users.length === 0 ? (
-                                        <tr><td colSpan={6} className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>No non-admin users found yet.</td></tr>
+                                        <tr><td colSpan={8} className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>No non-admin users found yet.</td></tr>
                                     ) : usersData.users.map((u) => (
                                         <tr key={u.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border)' }}>
-                                            <td className="px-4 py-3 text-sm font-medium truncate">{u.email}</td>
-                                            <td className="px-4 py-3 text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{u.username || '—'}</td>
-                                            <td className="px-4 py-3"><StatusPill status={u.account_status} /></td>
-                                            <td className="px-4 py-3 text-sm">
-                                                {u.is_active ? <CheckCircle2 size={16} style={{ color: '#10b981' }} /> : <XCircle size={16} style={{ color: '#ef4444' }} />}
+                                            <td className="px-3 py-3 text-xs font-medium truncate" title={u.email}>{u.email}</td>
+                                            <td className="px-3 py-3 text-xs truncate" style={{ color: 'var(--text-secondary)' }} title={u.full_name || u.username}>{u.full_name || u.username || '—'}</td>
+                                            <td className="px-3 py-3 text-xs font-mono truncate" style={{ color: u.phone ? 'var(--text-primary)' : '#ef4444' }}>
+                                                {u.phone || <span style={{ color: '#f59e0b', fontStyle: 'italic' }}>Not set</span>}
                                             </td>
-                                            <td className="px-4 py-3 text-xs font-mono truncate" style={{ color: 'var(--text-secondary)' }}>{safeDate(u.access_expires_at)}</td>
-                                            <td className="px-4 py-3">
+                                            <td className="px-3 py-3"><StatusPill status={u.account_status} /></td>
+                                            <td className="px-3 py-3 text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+                                                {u.auth_provider === 'google.com' ? '🔵 Google' : u.auth_provider === 'password' ? '🔑 Email' : (u.auth_provider || '—')}
+                                            </td>
+                                            <td className="px-3 py-3 text-xs font-mono truncate" style={{ color: 'var(--text-secondary)' }}>{safeDate(u.created_at)}</td>
+                                            <td className="px-3 py-3 text-xs font-mono truncate" style={{ color: 'var(--text-secondary)' }}>{safeDate(u.access_expires_at)}</td>
+                                            <td className="px-3 py-3">
                                                 {canManage ? (
-                                                    <button className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-all"
+                                                    <button className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-full transition-all"
                                                         style={{ background: 'var(--brand-glow)', color: 'var(--brand)', border: '1px solid rgba(0,188,212,0.2)' }}
-                                                        onClick={() => openManageModal(u.id)}><Eye size={12} /> Manage</button>
+                                                        onClick={() => openManageModal(u.id)}><Eye size={11} /> Manage</button>
                                                 ) : (
-                                                    <button className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full transition-all"
+                                                    <button className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-full transition-all"
                                                         style={{ background: 'rgba(148,163,184,0.08)', color: 'var(--text-muted)', border: '1px solid rgba(148,163,184,0.15)' }}
-                                                        onClick={() => openManageModal(u.id)}><Eye size={12} /> View</button>
+                                                        onClick={() => openManageModal(u.id)}><Eye size={11} /> View</button>
                                                 )}
                                             </td>
                                         </tr>
@@ -835,21 +870,45 @@ export default function AdminPanelPage() {
                             </div>
                             <button className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ color: 'var(--text-muted)' }} onClick={closeManageModal}><X size={18} /></button>
                         </div>
-                        <div className="p-5">
-                            <div className="grid grid-cols-2 gap-3">
-                                {[
-                                    { label: 'Status', content: <StatusPill status={modalUser.account_status} /> },
-                                    { label: 'Active', content: modalUser.is_active ? 'Yes' : 'No' },
-                                    { label: 'Expires', content: safeDate(modalUser.access_expires_at) },
-                                    { label: 'Approved At', content: safeDate(modalUser.approved_at) },
-                                ].map(({ label, content }) => (
-                                    <div key={label} className="p-3 rounded-xl" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
-                                        <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
-                                        <div className="text-sm">{content}</div>
-                                    </div>
-                                ))}
+                        <div className="p-5 flex flex-col gap-4">
+                            {/* Identity */}
+                            <div>
+                                <div className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--text-muted)' }}>Identity &amp; Contact</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                        { label: 'Full Name', value: modalUser.full_name || '—' },
+                                        { label: 'Username', value: modalUser.username || '—' },
+                                        { label: 'Email', value: modalUser.email },
+                                        { label: 'Mobile', value: modalUser.phone || 'Not set' },
+                                        { label: 'Auth Provider', value: modalUser.auth_provider === 'google.com' ? '🔵 Google' : modalUser.auth_provider === 'password' ? '🔑 Email' : (modalUser.auth_provider || '—') },
+                                        { label: 'Email Verified', value: modalUser.is_verified ? '✅ Yes' : '❌ No' },
+                                    ].map(({ label, value }) => (
+                                        <div key={label} className="p-2.5 rounded-xl" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
+                                            <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
+                                            <div className="text-xs break-all">{value}</div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
-                            <div className="mt-4 p-3 rounded-xl text-center text-sm" style={{ background: 'rgba(148,163,184,0.08)', color: 'var(--text-muted)' }}>
+                            {/* Account status */}
+                            <div>
+                                <div className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--text-muted)' }}>Status &amp; Dates</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                        { label: 'Status', value: <StatusPill status={modalUser.account_status} /> },
+                                        { label: 'Active', value: modalUser.is_active ? '✅ Yes' : '❌ No' },
+                                        { label: 'Registered', value: safeDate(modalUser.created_at) },
+                                        { label: 'Approved At', value: safeDate(modalUser.approved_at) },
+                                        { label: 'Expires', value: safeDate(modalUser.access_expires_at) },
+                                    ].map(({ label, value }) => (
+                                        <div key={label} className="p-2.5 rounded-xl" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
+                                            <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
+                                            <div className="text-xs font-mono">{value}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="p-3 rounded-xl text-center text-sm" style={{ background: 'rgba(148,163,184,0.08)', color: 'var(--text-muted)' }}>
                                 <EyeOff size={14} className="inline mr-1" /> View-only access. Contact root admin for management permissions.
                             </div>
                         </div>
