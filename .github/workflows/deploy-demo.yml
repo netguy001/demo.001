@@ -145,6 +145,7 @@ jobs:
       FRONTEND_IMAGE: ${{ format('ghcr.io/{0}/demo001-frontend', github.repository_owner) }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_ACTOR: ${{ github.actor }}
+      FAST2SMS_API_KEY: ${{ secrets.FAST2SMS_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -181,7 +182,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
           command_timeout: 12m
-          envs: BACKEND_IMAGE,FRONTEND_IMAGE,GH_TOKEN,GH_ACTOR
+          envs: BACKEND_IMAGE,FRONTEND_IMAGE,GH_TOKEN,GH_ACTOR,FAST2SMS_API_KEY
           script: |
             set -eo pipefail
             DEPLOY_DIR="/opt/alphasync-demo"

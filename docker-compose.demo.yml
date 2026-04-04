@@ -44,6 +44,7 @@ services:
       - FIREBASE_CREDENTIALS_JSON=${FIREBASE_CREDENTIALS_JSON:-}
       - FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
       - ADMIN_EMAIL_ALLOWLIST=${ADMIN_EMAIL_ALLOWLIST:-["meganath1025@gmail.com"]}
+      - FAST2SMS_API_KEY=${FAST2SMS_API_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "-s", "http://localhost:8000/api/health"]
       interval: 10s

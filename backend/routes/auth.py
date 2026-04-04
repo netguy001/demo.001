@@ -584,7 +584,6 @@ async def send_phone_otp(
     """
     from services.otp_service import generate_and_store_otp, send_otp_sms
     from services.email_service import send_phone_otp_email
-    from config.settings import settings
 
     firebase_uid = _require_firebase_uid(credentials)
 
