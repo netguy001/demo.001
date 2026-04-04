@@ -31,7 +31,7 @@ services:
       - REDIS_URL=redis://demo-redis:6379/0
       - CORS_ORIGINS=["https://demo.alphasync.app","http://localhost:3001"]
       - BROKER_ENCRYPTION_KEY=demo-broker-key-not-for-production-needs-32!!
-      - SIMULATION_MODE=true
+      - SIMULATION_MODE=false
       - STRICT_ZEBU_MARKET_DATA=${STRICT_ZEBU_MARKET_DATA:-false}
       - ZEBU_WS_URL=${ZEBU_WS_URL:-wss://go.mynt.in/NorenWSTP/}
       - ZEBU_API_URL=${ZEBU_API_URL:-https://go.mynt.in/NorenWClientTP}

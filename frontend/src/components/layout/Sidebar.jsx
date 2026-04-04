@@ -17,6 +17,7 @@ import {
   ClipboardList,
   Landmark,
   Gem,
+  FlipHorizontal2,
 } from "lucide-react";
 
 /* ─── Avatar helpers ─────────────────────────────────────── */
@@ -93,6 +94,7 @@ const NAV_SECTIONS = [
     items: [
       { to: "/portfolio", icon: Briefcase, label: "Portfolio" },
       { to: "/futures", icon: Landmark, label: "Futures" },
+      { to: "/options", icon: FlipHorizontal2, label: "Options" },
       { to: "/commodities", icon: Gem, label: "Commodities" },
       { to: "/orders", icon: ClipboardList, label: "Orders" },
       { to: "/algo", icon: Bot, label: "Algo Trading" },

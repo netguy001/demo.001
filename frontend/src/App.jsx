@@ -14,6 +14,7 @@ import PortfolioPage from './pages/PortfolioPage';
 import MarketPage from './pages/MarketPage';
 import OrdersPage from './pages/OrdersPage';
 import FuturesPage from './pages/FuturesPage';
+import OptionsPage from './pages/OptionsPage';
 import CommoditiesPage from './pages/CommoditiesPage';
 import AlgoTradingPage from './pages/AlgoTradingPage';
 import ZeroLossPage from './pages/ZeroLossPage';
@@ -73,6 +74,7 @@ export default function App() {
                             <Route path="/terminal" element={<TradingWorkspace />} />
                             <Route path="/market" element={<MarketPage />} />
                             <Route path="/futures" element={<FuturesPage />} />
+                            <Route path="/options" element={<OptionsPage />} />
                             <Route path="/commodities" element={<CommoditiesPage />} />
                             <Route path="/portfolio" element={<PortfolioPage />} />
                             <Route path="/orders" element={<OrdersPage />} />

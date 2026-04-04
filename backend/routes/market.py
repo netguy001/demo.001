@@ -150,13 +150,6 @@ async def get_history(
         except Exception:
             pass
 
-    # Final demo fallback for chart continuity
-    if not data and settings.SIMULATION_MODE and not _strict_zebu_only():
-        data = market_data.get_simulated_history(
-            symbol, period=period, interval=interval
-        )
-        data = market_data.normalize_history_candles(data)
-
     response = {"symbol": symbol, "candles": data, "count": len(data)}
     if data:
         history_cache.set(cache_key, response, ttl=60)

@@ -232,6 +232,7 @@ from routes.zeroloss import router as zeroloss_router
 from routes.broker import router as broker_router
 from routes.admin import router as admin_router
 from routes.futures import router as futures_router
+from routes.options import router as options_router
 
 app.include_router(auth_router)
 app.include_router(market_router)
@@ -244,6 +245,7 @@ app.include_router(zeroloss_router)
 app.include_router(broker_router)
 app.include_router(admin_router)
 app.include_router(futures_router)
+app.include_router(options_router)
 
 # ── Serve uploaded files (avatars etc.) ───────────────────────────────────────
 os.makedirs("uploads/avatars", exist_ok=True)

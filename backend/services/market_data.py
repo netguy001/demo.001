@@ -1863,12 +1863,9 @@ async def get_commodity_quotes(user_id: Optional[str] = None) -> list:
             except Exception as e:
                 logger.debug(f"Zebu commodity quote failed for {symbol}: {e}")
 
-        # 3. Fallback to simulation
+        # 3. No real data available
         if not quote:
-            if _strict_zebu_only():
-                return None
-            quote = _simulate_commodity_price(commodity)
-            quote["source"] = "simulated"
+            return None
 
         # Enrich with commodity metadata
         quote["name"] = commodity["name"]
