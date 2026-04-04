@@ -1,727 +1,596 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+// FuturesPage.jsx — Real NSE futures data + paper trading
+import { useCallback, useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
+import { RefreshCw, Search, TrendingUp, TrendingDown } from 'lucide-react';
 import api from '../services/api';
-import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
-import { useMarketIndicesStore } from '../stores/useMarketIndicesStore';
+import Modal from '../components/ui/Modal';
 import { cn } from '../utils/cn';
-import { formatCurrency, formatQuantity, formatPrice } from '../utils/formatters';
-import { Search, LineChart, TrendingUp, BarChart3 } from 'lucide-react';
+import { formatCurrency, formatPrice, formatQuantity } from '../utils/formatters';
 
-const FALLBACK_STOCKS = [
+// ── Popular F&O symbols ──────────────────────────────────────────────────────
+const DEFAULT_SYMBOLS = [
+    'NIFTY', 'BANKNIFTY', 'FINNIFTY',
     'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK',
     'SBIN', 'LT', 'ITC', 'AXISBANK', 'HINDUNILVR',
+    'TATAMOTORS', 'BAJFINANCE', 'WIPRO', 'ADANIENT', 'MARUTI',
 ];
 
-const EXPIRIES = ['24-MAR-2026', '30-MAR-2026', '07-APR-2026', '13-APR-2026', '21-APR-2026', '28-APR-2026', '26-MAY-2026'];
+const sanitize = (s = '') => String(s).replace(/\.(NS|BO)$/i, '').trim().toUpperCase();
 
-const LOT_SIZE_MAP = {
-    RELIANCE: 250, TCS: 150, HDFCBANK: 300, INFY: 300, ICICIBANK: 350,
-    SBIN: 750, LT: 175, ITC: 1600, AXISBANK: 400, HINDUNILVR: 300,
-};
-
-const sanitizeSymbol = (symbol = '') => String(symbol).replace(/\.(NS|BO)$/i, '').trim().toUpperCase();
-
-function symbolHash(input) {
-    let hash = 0;
-    const normalized = String(input || '');
-    for (let index = 0; index < normalized.length; index += 1) {
-        hash = (hash << 5) - hash + normalized.charCodeAt(index);
-        hash |= 0;
-    }
-    return Math.abs(hash);
+function pct(val) {
+    if (val == null) return '—';
+    const v = Number(val);
+    const sign = v >= 0 ? '+' : '';
+    return `${sign}${v.toFixed(2)}%`;
 }
 
-function lotSize(symbol) {
-    return LOT_SIZE_MAP[symbol] || 250;
+function chg(val) {
+    if (val == null) return '—';
+    const v = Number(val);
+    const sign = v >= 0 ? '+' : '';
+    return `${sign}${formatPrice(v)}`;
 }
 
-function priceStep(spotPrice) {
-    if (spotPrice < 300) return 5;
-    if (spotPrice < 1000) return 10;
-    if (spotPrice < 3000) return 20;
-    return 50;
-}
-
-function dummySpot(symbol) {
-    const base = 120 + (symbolHash(symbol) % 4200);
-    return Number((base + 0.35).toFixed(2));
-}
-
-/** Approximation of error function (erf) */
-function erfApprox(x) {
-    const a1 = 0.254829592;
-    const a2 = -0.284496736;
-    const a3 = 1.421413741;
-    const a4 = -1.453152027;
-    const a5 = 1.061405429;
-    const p = 0.3275911;
-
-    const sign = x < 0 ? -1 : 1;
-    x = Math.abs(x);
-
-    const t = 1.0 / (1.0 + p * x);
-    const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-
-    return sign * y;
-}
-
-/** Approximate Greeks using simplified Black-Scholes */
-function calculateGreeks(S, K, T, r, sigma, optionType) {
-    if (T <= 0) T = 0.01;
-    if (sigma <= 0) sigma = 0.25;
-
-    const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
-    const d2 = d1 - sigma * Math.sqrt(T);
-
-    const Phi = (x) => (1 + erfApprox(x / Math.sqrt(2))) / 2;
-    const phi = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
-
-    if (optionType === 'call') {
-        const delta = Phi(d1);
-        const gamma = phi(d1) / (S * sigma * Math.sqrt(T));
-        const vega = S * phi(d1) * Math.sqrt(T) / 100;
-        const theta = (-S * phi(d1) * sigma) / (2 * Math.sqrt(T)) - r * K * Math.exp(-r * T) * Phi(d2);
-        return {
-            delta: Math.max(0, Math.min(1, delta)),
-            gamma: Math.max(0, Math.min(1, gamma)),
-            vega: vega / 100,
-            theta: theta / 365,
-        };
-    } else {
-        const delta = Phi(d1) - 1;
-        const gamma = phi(d1) / (S * sigma * Math.sqrt(T));
-        const vega = S * phi(d1) * Math.sqrt(T) / 100;
-        const theta = (-S * phi(d1) * sigma) / (2 * Math.sqrt(T)) + r * K * Math.exp(-r * T) * Phi(-d2);
-        return {
-            delta: Math.max(-1, Math.min(0, delta)),
-            gamma: Math.max(0, Math.min(1, gamma)),
-            vega: vega / 100,
-            theta: theta / 365,
-        };
-    }
-}
-
-function buildChainWithGreeks(symbol, spotPrice) {
-    const step = priceStep(spotPrice);
-    const atm = Math.round(spotPrice / step) * step;
-    const rows = [];
-    const T = 30 / 365; // 30 days to expiry
-    const r = 0.05; // Risk-free rate
-
-    for (let index = -4; index <= 5; index += 1) {
-        const K = atm + index * step;
-        const rowHash = symbolHash(`${symbol}-${K}`);
-
-        // Base prices
-        const callLtp = Number((Math.max(1, spotPrice - K + (rowHash % 120) / 10 + 8)).toFixed(2));
-        const putLtp = Number((Math.max(1, K - spotPrice + (rowHash % 110) / 10 + 8)).toFixed(2));
-
-        // IV varies by strike (volatility smile)
-        const moneyness = Math.abs(spotPrice - K) / spotPrice;
-        const baseIV = 0.20 + moneyness * 0.08;
-        const callIV = baseIV + (rowHash % 50) / 1000;
-        const putIV = baseIV + (rowHash % 60) / 1000;
-
-        // Greeks
-        const callGreeks = calculateGreeks(spotPrice, K, T, r, callIV, 'call');
-        const putGreeks = calculateGreeks(spotPrice, K, T, r, putIV, 'put');
-
-        // Volume and OI
-        const callVolume = 1000 + (rowHash % 8000);
-        const putVolume = 1200 + (rowHash % 9000);
-        const callOi = 15000 + (rowHash % 135000);
-        const putOi = 18000 + (rowHash % 145000);
-
-        // Bid-Ask spreads
-        const callBid = (callLtp * 0.98).toFixed(2);
-        const callAsk = (callLtp * 1.02).toFixed(2);
-        const putBid = (putLtp * 0.98).toFixed(2);
-        const putAsk = (putLtp * 1.02).toFixed(2);
-
-        rows.push({
-            strike: K,
-            moneyness: moneyness > 0.05 ? (spotPrice > K ? 'ITM' : 'OTM') : 'ATM',
-            
-            // Call data
-            callLtp: Number(callLtp.toFixed(2)),
-            callBid: Number(callBid),
-            callAsk: Number(callAsk),
-            callIV: (callIV * 100).toFixed(2),
-            callDelta: callGreeks.delta.toFixed(2),
-            callGamma: callGreeks.gamma.toFixed(4),
-            callVega: callGreeks.vega.toFixed(3),
-            callTheta: callGreeks.theta.toFixed(4),
-            callVolume,
-            callOi,
-            callChange: ((rowHash % 240) - 120) / 45,
-
-            // Put data
-            putLtp: Number(putLtp.toFixed(2)),
-            putBid: Number(putBid),
-            putAsk: Number(putAsk),
-            putIV: (putIV * 100).toFixed(2),
-            putDelta: putGreeks.delta.toFixed(2),
-            putGamma: putGreeks.gamma.toFixed(4),
-            putVega: putGreeks.vega.toFixed(3),
-            putTheta: putGreeks.theta.toFixed(4),
-            putVolume,
-            putOi,
-            putChange: ((rowHash % 220) - 110) / 45,
-
-            lot: lotSize(symbol),
-        });
-    }
-
-    return rows;
-}
-
-function getMoneynessBgColor(moneyness) {
-    if (moneyness === 'ITM') return 'bg-emerald-500/10 border-emerald-500/20';
-    if (moneyness === 'OTM') return 'bg-red-500/10 border-red-500/20';
-    return 'bg-amber-500/10 border-amber-500/20';
-}
-
-function getMoneynessBadgeColor(moneyness) {
-    if (moneyness === 'ITM') return 'bg-emerald-500/20 text-emerald-500';
-    if (moneyness === 'OTM') return 'bg-red-500/20 text-red-500';
-    return 'bg-amber-500/20 text-amber-500';
-}
-
-function FuturesOrderModal({ isOpen, onClose, symbol, expiry, row, side }) {
-    const [orderSide, setOrderSide] = useState(side || 'BUY');
-    const [orderType, setOrderType] = useState('LIMIT');
-    const [productType, setProductType] = useState('NRML');
+// ── Order modal ───────────────────────────────────────────────────────────────
+function OrderModal({ isOpen, onClose, contract, spotPrice, onPlaced }) {
+    const [side, setSide] = useState('BUY');
+    const [orderType, setOrderType] = useState('MARKET');
     const [lots, setLots] = useState(1);
     const [limitPrice, setLimitPrice] = useState('');
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        setOrderSide(side || 'BUY');
-        setOrderType('LIMIT');
-        setProductType('NRML');
-        setLots(1);
-        if (row) setLimitPrice(String(row.callLtp));
-    }, [row, side]);
+        if (contract) {
+            setSide('BUY');
+            setOrderType('MARKET');
+            setLots(1);
+            setLimitPrice(String(contract.ltp ?? contract.close ?? ''));
+        }
+    }, [contract]);
 
-    if (!row) return null;
+    if (!contract) return null;
 
-    const qty = lots * row.lot;
-    const effectivePrice = Number(limitPrice || row.callLtp);
+    const lotSize = contract.lot_size ?? 1;
+    const qty = lots * lotSize;
+    const effectivePrice = orderType === 'MARKET'
+        ? (contract.ltp ?? contract.close ?? 0)
+        : Number(limitPrice || 0);
     const orderValue = qty * effectivePrice;
 
+    const handlePlace = async () => {
+        setLoading(true);
+        try {
+            await api.post('/futures/orders/place', {
+                contract_symbol: contract.contract_symbol,
+                side,
+                order_type: orderType,
+                quantity: qty,
+                price: orderType === 'LIMIT' ? Number(limitPrice) : null,
+                client_price: effectivePrice,
+            });
+            toast.success(`${side} order placed — ${contract.contract_symbol}`);
+            onPlaced?.();
+            onClose();
+        } catch (err) {
+            toast.error(err?.response?.data?.detail ?? 'Order failed. Try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Futures Order" size="md">
+        <Modal isOpen={isOpen} onClose={onClose} title="Place Futures Order" size="md">
             <div className="p-5 space-y-4">
-                <div className="rounded-lg border border-edge/10 bg-surface-900/50 p-3">
+                <div className="rounded-lg border border-edge/10 bg-surface-900/50 p-3 space-y-1">
                     <p className="text-xs text-gray-500">Contract</p>
-                    <p className="text-sm font-semibold text-heading mt-1">{symbol} FUT {expiry}</p>
-                    <p className="text-xs text-gray-500 mt-1">Strike {row.strike} • Lot {row.lot}</p>
+                    <p className="text-sm font-bold text-heading">{contract.contract_symbol}</p>
+                    <div className="flex gap-4 text-xs text-gray-500 mt-0.5">
+                        <span>Expiry: {contract.expiry_label ?? ''} ({contract.expiry_date ?? ''})</span>
+                        <span>Lot: {lotSize}</span>
+                        {contract.ltp != null && <span>LTP: ₹{formatPrice(contract.ltp)}</span>}
+                    </div>
                 </div>
 
+                {/* BUY / SELL toggle */}
                 <div className="flex rounded-xl overflow-hidden border border-edge/10 bg-surface-800/60 p-0.5">
-                    {['BUY', 'SELL'].map((value) => (
+                    {['BUY', 'SELL'].map((v) => (
                         <button
-                            key={value}
-                            onClick={() => setOrderSide(value)}
+                            key={v}
+                            onClick={() => setSide(v)}
                             className={cn(
                                 'flex-1 py-2 text-sm font-bold rounded-lg transition-all duration-200',
-                                orderSide === value
-                                    ? value === 'BUY' ? 'bg-bull text-white' : 'bg-bear text-white'
-                                    : 'text-gray-500 hover:text-gray-700'
+                                side === v
+                                    ? v === 'BUY' ? 'bg-bull text-white' : 'bg-bear text-white'
+                                    : 'text-gray-500 hover:text-heading',
                             )}
-                        >
-                            {value}
-                        </button>
+                        >{v}</button>
                     ))}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                     <div>
                         <label className="metric-label block mb-1">Order Type</label>
                         <select
                             value={orderType}
-                            onChange={(event) => setOrderType(event.target.value)}
+                            onChange={(e) => setOrderType(e.target.value)}
                             className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm text-heading focus:outline-none"
                         >
-                            <option value="LIMIT">LIMIT</option>
                             <option value="MARKET">MARKET</option>
+                            <option value="LIMIT">LIMIT</option>
                         </select>
                     </div>
-                    <div>
-                        <label className="metric-label block mb-1">Product</label>
-                        <select
-                            value={productType}
-                            onChange={(event) => setProductType(event.target.value)}
-                            className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm text-heading focus:outline-none"
-                        >
-                            <option value="NRML">NRML</option>
-                            <option value="MIS">MIS</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label className="metric-label block mb-1">Lots</label>
                         <input
                             type="number"
                             min={1}
                             value={lots}
-                            onChange={(event) => setLots(Math.max(1, Number(event.target.value) || 1))}
+                            onChange={(e) => setLots(Math.max(1, Number(e.target.value) || 1))}
                             className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm text-heading focus:outline-none"
                         />
                     </div>
+                </div>
+
+                {orderType === 'LIMIT' && (
                     <div>
                         <label className="metric-label block mb-1">Limit Price (₹)</label>
                         <input
                             type="number"
                             step="0.05"
                             value={limitPrice}
-                            onChange={(event) => setLimitPrice(event.target.value)}
-                            disabled={orderType === 'MARKET'}
-                            className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm text-heading focus:outline-none disabled:opacity-60"
+                            onChange={(e) => setLimitPrice(e.target.value)}
+                            className="w-full bg-surface-800/60 border border-edge/10 rounded-lg px-3 py-2 text-sm text-heading focus:outline-none"
                         />
                     </div>
-                </div>
+                )}
 
-                <div className="rounded-lg border border-edge/10 bg-surface-900/50 p-3 space-y-1.5">
-                    <div className="flex justify-between text-xs">
+                <div className="rounded-lg border border-edge/10 bg-surface-900/50 p-3 space-y-1.5 text-xs">
+                    <div className="flex justify-between">
                         <span className="text-gray-500">Quantity</span>
-                        <span className="text-heading font-medium tabular-nums">{formatQuantity(qty)}</span>
+                        <span className="text-heading font-medium">{formatQuantity(qty)}</span>
                     </div>
-                    <div className="flex justify-between text-xs">
+                    <div className="flex justify-between">
                         <span className="text-gray-500">Estimated Value</span>
-                        <span className="text-heading font-medium tabular-nums">{formatCurrency(orderValue)}</span>
+                        <span className="text-heading font-medium">{formatCurrency(orderValue)}</span>
                     </div>
+                    {spotPrice != null && effectivePrice > 0 && (
+                        <div className="flex justify-between">
+                            <span className="text-gray-500">Basis (Fut − Spot)</span>
+                            <span className={cn('font-medium', (effectivePrice - spotPrice) >= 0 ? 'text-bull' : 'text-bear')}>
+                                {chg(effectivePrice - spotPrice)}
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 <button
                     type="button"
+                    onClick={handlePlace}
+                    disabled={loading}
                     className={cn(
-                        'w-full rounded-lg py-2.5 text-sm font-bold text-white transition-all',
-                        orderSide === 'BUY' ? 'bg-bull hover:brightness-110' : 'bg-bear hover:brightness-110'
+                        'w-full rounded-lg py-2.5 text-sm font-bold text-white transition-all disabled:opacity-60',
+                        side === 'BUY' ? 'bg-bull hover:brightness-110' : 'bg-bear hover:brightness-110',
                     )}
                 >
-                    Place {orderSide} Order
+                    {loading ? 'Placing…' : `Place ${side} Order`}
                 </button>
             </div>
         </Modal>
     );
 }
 
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function FuturesPage() {
-    const tickerItems = useMarketIndicesStore((state) => state.tickerItems);
-    const fetchTicker = useMarketIndicesStore((state) => state.fetchTicker);
-
-    const [selectedExpiry, setSelectedExpiry] = useState(EXPIRIES[0]);
-    const [selectedSymbol, setSelectedSymbol] = useState(FALLBACK_STOCKS[0]);
+    const [symbol, setSymbol] = useState('NIFTY');
     const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState([]);
+    const [searchResults, setSearchResults] = useState(DEFAULT_SYMBOLS.map((s) => ({ symbol: s })));
     const [showResults, setShowResults] = useState(false);
-    const [orderPopup, setOrderPopup] = useState({ open: false, row: null, side: 'BUY' });
-    const [viewMode, setViewMode] = useState('standard'); // 'standard' | 'greeks' | 'iv'
-    const [filterMoneyness, setFilterMoneyness] = useState('all'); // 'all' | 'itm' | 'atm' | 'otm'
-
     const searchRef = useRef(null);
 
-    useEffect(() => {
-        fetchTicker();
-    }, [fetchTicker]);
+    // Data state
+    const [contracts, setContracts] = useState([]);
+    const [quotes, setQuotes] = useState({});   // contract_symbol → quote
+    const [spot, setSpot] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState(null);
 
-    const stockUniverse = useMemo(() => {
-        const fromTicker = tickerItems
-            .filter((item) => item.kind !== 'index')
-            .map((item) => sanitizeSymbol(item.symbol || item.name));
+    // Positions / orders
+    const [positions, setPositions] = useState([]);
+    const [orders, setOrders] = useState([]);
+    const [bottomTab, setBottomTab] = useState('positions');
 
-        return [...FALLBACK_STOCKS, ...fromTicker]
-            .filter(Boolean)
-            .filter((value, index, self) => self.indexOf(value) === index)
-            .sort((a, b) => a.localeCompare(b));
-    }, [tickerItems]);
+    // Order modal
+    const [orderModal, setOrderModal] = useState({ open: false, contract: null });
 
-    useEffect(() => {
-        if (!stockUniverse.includes(selectedSymbol)) {
-            setSelectedSymbol(stockUniverse[0] || FALLBACK_STOCKS[0]);
-        }
-    }, [stockUniverse, selectedSymbol]);
+    // ── Fetch contracts + spot ────────────────────────────────────────────────
+    const fetchContracts = useCallback(async (sym) => {
+        setLoading(true);
+        try {
+            const [contractsRes, spotRes] = await Promise.all([
+                api.get(`/futures/contracts/${sym}`),
+                api.get(`/futures/spot/${sym}`),
+            ]);
 
-    useEffect(() => {
-        if (searchQuery.trim().length < 1) {
-            setSearchResults(stockUniverse.slice(0, 100).map((symbol) => ({ symbol, name: symbol, exchange: 'NSE' })));
-            return;
-        }
+            const contractList = contractsRes.data.contracts ?? [];
+            setContracts(contractList);
+            setSpot(spotRes.data.ltp ?? null);
+            setLastUpdated(new Date());
 
-        const localMatches = stockUniverse
-            .filter((symbol) => symbol.includes(searchQuery.trim().toUpperCase()))
-            .slice(0, 60)
-            .map((symbol) => ({ symbol, name: symbol, exchange: 'NSE' }));
-
-        const timeout = setTimeout(async () => {
-            try {
-                const response = await api.get(`/market/search?q=${encodeURIComponent(searchQuery.trim())}`);
-                const apiResults = (response.data.results || []).map((item) => ({
-                    symbol: sanitizeSymbol(item.symbol),
-                    name: item.name || sanitizeSymbol(item.symbol),
-                    exchange: item.exchange || 'NSE',
-                }));
-
-                const merged = [...apiResults, ...localMatches]
-                    .filter((item) => item.symbol)
-                    .filter((item, index, self) => self.findIndex((target) => target.symbol === item.symbol) === index)
-                    .slice(0, 100);
-
-                setSearchResults(merged);
-            } catch {
-                setSearchResults(localMatches);
+            // Fetch quotes for each contract in parallel
+            if (contractList.length > 0) {
+                const quoteResults = await Promise.allSettled(
+                    contractList.map((c) => api.get(`/futures/quote/${c.contract_symbol}`))
+                );
+                const newQuotes = {};
+                quoteResults.forEach((r, i) => {
+                    if (r.status === 'fulfilled') {
+                        newQuotes[contractList[i].contract_symbol] = r.value.data;
+                    }
+                });
+                setQuotes(newQuotes);
             }
-        }, 200);
-
-        return () => clearTimeout(timeout);
-    }, [searchQuery, stockUniverse]);
-
-    useEffect(() => {
-        const onOutside = (event) => {
-            if (searchRef.current && !searchRef.current.contains(event.target)) {
-                setShowResults(false);
-            }
-        };
-        document.addEventListener('mousedown', onOutside);
-        return () => document.removeEventListener('mousedown', onOutside);
+        } catch (err) {
+            toast.error('Failed to load futures contracts.');
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    const spot = useMemo(() => dummySpot(selectedSymbol), [selectedSymbol]);
-    const rows = useMemo(() => buildChainWithGreeks(selectedSymbol, spot), [selectedSymbol, spot]);
+    const fetchPositionsOrders = useCallback(async () => {
+        try {
+            const [posRes, ordRes] = await Promise.all([
+                api.get('/futures/positions'),
+                api.get('/futures/orders'),
+            ]);
+            setPositions(posRes.data.positions ?? []);
+            setOrders(ordRes.data.orders ?? []);
+        } catch { /* silent */ }
+    }, []);
 
-    const filteredRows = useMemo(() => {
-        if (filterMoneyness === 'all') return rows;
-        return rows.filter((r) => r.moneyness.toLowerCase() === filterMoneyness);
-    }, [rows, filterMoneyness]);
+    // Load on symbol change
+    useEffect(() => {
+        setContracts([]);
+        setQuotes({});
+        setSpot(null);
+        fetchContracts(symbol);
+        fetchPositionsOrders();
+    }, [symbol, fetchContracts, fetchPositionsOrders]);
 
-    const openOrderPopup = (row, side) => setOrderPopup({ open: true, row, side });
+    // Auto-refresh every 30s
+    useEffect(() => {
+        const id = setInterval(() => {
+            fetchContracts(symbol);
+        }, 30_000);
+        return () => clearInterval(id);
+    }, [symbol, fetchContracts]);
 
-    // Calculate IV statistics
-    const avgCallIV = (rows.reduce((sum, r) => sum + parseFloat(r.callIV), 0) / rows.length).toFixed(2);
-    const avgPutIV = (rows.reduce((sum, r) => sum + parseFloat(r.putIV), 0) / rows.length).toFixed(2);
+    // Search handling
+    useEffect(() => {
+        const q = searchQuery.trim().toUpperCase();
+        if (!q) {
+            setSearchResults(DEFAULT_SYMBOLS.map((s) => ({ symbol: s })));
+            return;
+        }
+        const local = DEFAULT_SYMBOLS
+            .filter((s) => s.includes(q))
+            .map((s) => ({ symbol: s }));
+
+        const t = setTimeout(async () => {
+            try {
+                const res = await api.get(`/market/search?q=${encodeURIComponent(q)}`);
+                const api_results = (res.data.results ?? []).map((r) => ({ symbol: sanitize(r.symbol), name: r.name }));
+                const merged = [...api_results, ...local]
+                    .filter((r) => r.symbol)
+                    .filter((r, i, arr) => arr.findIndex((x) => x.symbol === r.symbol) === i)
+                    .slice(0, 80);
+                setSearchResults(merged);
+            } catch {
+                setSearchResults(local);
+            }
+        }, 200);
+        return () => clearTimeout(t);
+    }, [searchQuery]);
+
+    // Click outside to close search
+    useEffect(() => {
+        const handler = (e) => {
+            if (searchRef.current && !searchRef.current.contains(e.target)) setShowResults(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    const handleCancelOrder = async (orderId) => {
+        try {
+            await api.delete(`/futures/orders/${orderId}`);
+            toast.success('Order cancelled.');
+            fetchPositionsOrders();
+        } catch (err) {
+            toast.error(err?.response?.data?.detail ?? 'Cancel failed.');
+        }
+    };
+
+    const openOrder = (contract) => {
+        const q = quotes[contract.contract_symbol] ?? {};
+        setOrderModal({ open: true, contract: { ...contract, ...q } });
+    };
 
     return (
         <div className="p-4 lg:p-6 space-y-6 animate-fade-in">
-            {/* Header */}
+            {/* ── Header ── */}
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-display font-bold text-heading">Options Chain</h1>
+                    <h1 className="text-3xl font-display font-bold text-heading">Futures</h1>
+                    <p className="text-sm text-gray-500 mt-1">Live NSE futures contracts • Paper trading</p>
                 </div>
-                <div className="flex gap-2">
-                    <Badge variant="primary" className="font-semibold">Simulation Data Only</Badge>
-                </div>
-            </div>
-
-            {/* Controls */}
-            <div className="glass-card p-4 space-y-4">
-                <div className="flex flex-wrap items-center gap-3">
-                    <div className="relative flex-1 lg:w-[380px]" ref={searchRef}>
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                        <input
-                            type="text"
-                            value={searchQuery}
-                            onChange={(event) => setSearchQuery(event.target.value)}
-                            onFocus={() => setShowResults(true)}
-                            placeholder="Search stocks… (e.g. RELIANCE, TCS)"
-                            className={cn(
-                                'w-full bg-surface-800/60 border border-edge/5 rounded-lg',
-                                'pl-10 pr-3 py-2 text-sm text-heading placeholder-gray-500',
-                                'focus:outline-none focus:border-primary-500/30'
-                            )}
-                        />
-
-                        {showResults && (
-                            <div className="absolute top-full left-0 mt-1 w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-2xl z-50 max-h-[320px] overflow-y-auto">
-                                {searchResults.length > 0 ? (
-                                    searchResults.map((stock) => (
-                                        <button
-                                            key={stock.symbol}
-                                            onClick={() => {
-                                                setSelectedSymbol(sanitizeSymbol(stock.symbol));
-                                                setSearchQuery('');
-                                                setShowResults(false);
-                                            }}
-                                            className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-700 last:border-0"
-                                        >
-                                            <span className="font-semibold text-gray-900 dark:text-slate-100">{sanitizeSymbol(stock.symbol)}</span>
-                                        </button>
-                                    ))
-                                ) : (
-                                    <div className="px-4 py-3 text-center text-xs text-gray-500">No stocks found</div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    <select
-                        value={selectedExpiry}
-                        onChange={(event) => setSelectedExpiry(event.target.value)}
-                        className="h-10 min-w-[150px] bg-surface-800/60 border border-edge/10 rounded-lg px-3 text-sm font-semibold text-heading focus:outline-none"
+                <div className="flex items-center gap-2">
+                    {lastUpdated && (
+                        <span className="text-xs text-gray-500">
+                            Updated {lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                    )}
+                    <button
+                        onClick={() => fetchContracts(symbol)}
+                        disabled={loading}
+                        className="p-1.5 rounded-lg text-gray-500 hover:text-heading hover:bg-overlay/5 transition-colors disabled:opacity-50"
+                        title="Refresh"
                     >
-                        {EXPIRIES.map((expiry) => (
-                            <option key={expiry} value={expiry}>{expiry}</option>
-                        ))}
-                    </select>
-                </div>
-
-                {/* View Mode & Filters */}
-                <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-edge/5">
-                    <div className="flex gap-2">
-                        {[
-                            { mode: 'standard', label: 'Standard', icon: '◧' },
-                            { mode: 'greeks', label: 'Greeks', icon: 'Δ' },
-                            { mode: 'iv', label: 'IV Analysis', icon: '◐' },
-                        ].map(({ mode, label, icon }) => (
-                            <button
-                                key={mode}
-                                onClick={() => setViewMode(mode)}
-                                className={cn(
-                                    'px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
-                                    viewMode === mode
-                                        ? 'bg-primary-600/20 border border-primary-500/40 text-primary-600'
-                                        : 'bg-surface-800/60 border border-edge/10 text-gray-500 hover:text-heading'
-                                )}
-                            >
-                                {icon} {label}
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="flex gap-2 ml-auto">
-                        {['all', 'itm', 'atm', 'otm'].map((filter) => (
-                            <button
-                                key={filter}
-                                onClick={() => setFilterMoneyness(filter)}
-                                className={cn(
-                                    'px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all',
-                                    filterMoneyness === filter
-                                        ? 'bg-primary-600/20 border border-primary-500/40 text-primary-600'
-                                        : 'bg-surface-800/60 border border-edge/10 text-gray-500 hover:text-heading'
-                                )}
-                            >
-                                {filter.toUpperCase()}
-                            </button>
-                        ))}
-                    </div>
+                        <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+                    </button>
+                    <Badge variant="success" className="font-semibold">NSE LIVE</Badge>
                 </div>
             </div>
 
-            {/* Summary Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                    { label: 'Spot Price', value: `₹${formatPrice(spot)}`, trend: null },
-                    { label: 'Call IV (Avg)', value: `${avgCallIV}%`, trend: null },
-                    { label: 'Put IV (Avg)', value: `${avgPutIV}%`, trend: null },
-                    { label: 'Total Rows', value: filteredRows.length, trend: null },
-                ].map(({ label, value, trend }) => (
-                    <div key={label} className="glass-card p-3 rounded-xl">
-                        <p className="text-[11px] text-gray-500 uppercase font-semibold">{label}</p>
-                        <p className="text-lg font-bold text-heading mt-1">{value}</p>
+            {/* ── Controls ── */}
+            <div className="glass-card p-4 flex flex-wrap items-center gap-3">
+                {/* Symbol search */}
+                <div className="relative flex-1 min-w-[220px]" ref={searchRef}>
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onFocus={() => setShowResults(true)}
+                        placeholder={`Search symbol… (e.g. ${symbol})`}
+                        className="w-full bg-surface-800/60 border border-edge/5 rounded-lg pl-10 pr-3 py-2 text-sm text-heading placeholder-gray-500 focus:outline-none focus:border-primary-500/30"
+                    />
+                    {showResults && (
+                        <div className="absolute top-full left-0 mt-1 w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto">
+                            {searchResults.length > 0 ? searchResults.map((r) => (
+                                <button
+                                    key={r.symbol}
+                                    onClick={() => { setSymbol(r.symbol); setSearchQuery(''); setShowResults(false); }}
+                                    className="w-full text-left px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-700 last:border-0"
+                                >
+                                    <span className="font-semibold text-gray-900 dark:text-slate-100">{r.symbol}</span>
+                                    {r.name && r.name !== r.symbol && (
+                                        <span className="text-xs text-gray-500 ml-2">{r.name}</span>
+                                    )}
+                                </button>
+                            )) : (
+                                <div className="px-4 py-3 text-center text-xs text-gray-500">No results</div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Spot price chip */}
+                {spot != null && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-800/60 border border-edge/10 text-sm">
+                        <span className="text-gray-500">Spot</span>
+                        <span className="font-bold text-heading">₹{formatPrice(spot)}</span>
                     </div>
-                ))}
+                )}
             </div>
 
-            {/* Options Chain Table */}
+            {/* ── Contracts table ── */}
             <div className="glass-card overflow-hidden">
-                <div className="px-4 py-3 border-b border-edge/5 bg-surface-900/50">
-                    <p className="text-sm font-bold text-heading">{selectedSymbol} Options Chain • {selectedExpiry}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">View: {viewMode === 'standard' ? 'Price & Volume' : viewMode === 'greeks' ? 'Greeks & Risk Metrics' : 'Implied Volatility'}</p>
-                </div>
-
-                <div className="overflow-x-auto">
-                    <div className="min-w-max">
-                        {viewMode === 'standard' && (
-                            <StandardView rows={filteredRows} spot={spot} onOrderPopup={openOrderPopup} />
-                        )}
-                        {viewMode === 'greeks' && (
-                            <GreeksView rows={filteredRows} spot={spot} onOrderPopup={openOrderPopup} />
-                        )}
-                        {viewMode === 'iv' && (
-                            <IVView rows={filteredRows} spot={spot} onOrderPopup={openOrderPopup} />
-                        )}
+                <div className="px-4 py-3 border-b border-edge/5 bg-surface-900/50 flex items-center justify-between">
+                    <div>
+                        <p className="text-sm font-bold text-heading">{symbol} Futures Contracts</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                            {contracts.length > 0 ? `${contracts.length} contracts available` : 'Loading…'}
+                        </p>
                     </div>
                 </div>
+
+                {loading && contracts.length === 0 ? (
+                    <div className="flex items-center justify-center py-16 text-gray-500 text-sm">
+                        <RefreshCw className="w-4 h-4 animate-spin mr-2" /> Fetching contracts…
+                    </div>
+                ) : contracts.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-gray-500 text-sm gap-2">
+                        <p>No contracts found for <span className="font-semibold text-heading">{symbol}</span></p>
+                        <p className="text-xs">Try a different symbol or check market hours.</p>
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-edge/5 bg-surface-900/40">
+                                    {['Contract', 'Expiry', 'Label', 'Lot Size', 'LTP', 'Chg', 'Chg %', 'Volume', 'OI', 'Basis', 'Action'].map((h) => (
+                                        <th key={h} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase text-left whitespace-nowrap">{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {contracts.map((c) => {
+                                    const q = quotes[c.contract_symbol] ?? {};
+                                    const ltp = q.ltp ?? null;
+                                    const change = ltp != null && q.close != null ? ltp - q.close : null;
+                                    const changePct = q.close ? (change / q.close) * 100 : null;
+                                    const basis = ltp != null && spot != null ? ltp - spot : null;
+                                    const isUp = change != null && change >= 0;
+
+                                    return (
+                                        <tr key={c.contract_symbol} className="border-b border-edge/5 hover:bg-overlay/[0.03] transition-colors">
+                                            <td className="px-4 py-3 font-mono text-xs font-semibold text-heading whitespace-nowrap">{c.contract_symbol}</td>
+                                            <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{c.expiry_date}</td>
+                                            <td className="px-4 py-3">
+                                                <span className={cn(
+                                                    'text-[10px] font-bold px-2 py-0.5 rounded-full',
+                                                    c.expiry_label === 'Near' ? 'bg-primary-500/15 text-primary-500' :
+                                                    c.expiry_label === 'Mid'  ? 'bg-amber-500/15 text-amber-500' :
+                                                    'bg-gray-500/15 text-gray-400'
+                                                )}>{c.expiry_label}</span>
+                                            </td>
+                                            <td className="px-4 py-3 text-xs tabular-nums text-heading">{formatQuantity(c.lot_size)}</td>
+                                            <td className="px-4 py-3 text-xs tabular-nums font-semibold text-heading">
+                                                {ltp != null ? `₹${formatPrice(ltp)}` : <span className="text-gray-500">—</span>}
+                                            </td>
+                                            <td className={cn('px-4 py-3 text-xs tabular-nums', change == null ? 'text-gray-500' : isUp ? 'text-bull' : 'text-bear')}>
+                                                {chg(change)}
+                                            </td>
+                                            <td className={cn('px-4 py-3 text-xs tabular-nums', changePct == null ? 'text-gray-500' : isUp ? 'text-bull' : 'text-bear')}>
+                                                {pct(changePct)}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs tabular-nums text-gray-400">
+                                                {q.volume != null ? formatQuantity(q.volume) : '—'}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs tabular-nums text-gray-400">
+                                                {q.oi != null && q.oi > 0 ? formatQuantity(q.oi) : '—'}
+                                            </td>
+                                            <td className={cn('px-4 py-3 text-xs tabular-nums', basis == null ? 'text-gray-500' : basis >= 0 ? 'text-bull' : 'text-bear')}>
+                                                {basis != null ? chg(basis) : '—'}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <button
+                                                    onClick={() => openOrder(c)}
+                                                    className="px-3 py-1 rounded-md bg-primary-500/10 text-primary-600 text-xs font-semibold hover:bg-primary-500/20 transition-colors whitespace-nowrap"
+                                                >
+                                                    Trade
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
-            <FuturesOrderModal
-                isOpen={orderPopup.open}
-                onClose={() => setOrderPopup({ open: false, row: null, side: 'BUY' })}
-                symbol={selectedSymbol}
-                expiry={selectedExpiry}
-                row={orderPopup.row}
-                side={orderPopup.side}
+            {/* ── Positions / Orders ── */}
+            <div className="glass-card overflow-hidden">
+                <div className="border-b border-edge/5 flex">
+                    {[
+                        { key: 'positions', label: `Positions (${positions.length})` },
+                        { key: 'orders',    label: `Orders (${orders.length})` },
+                    ].map(({ key, label }) => (
+                        <button
+                            key={key}
+                            onClick={() => setBottomTab(key)}
+                            className={cn(
+                                'px-5 py-3 text-sm font-semibold transition-colors border-b-2',
+                                bottomTab === key
+                                    ? 'text-primary-600 border-primary-500'
+                                    : 'text-gray-500 border-transparent hover:text-heading',
+                            )}
+                        >{label}</button>
+                    ))}
+                </div>
+
+                {bottomTab === 'positions' && (
+                    positions.length === 0 ? (
+                        <div className="flex items-center justify-center py-12 text-gray-500 text-sm">No open positions</div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-edge/5 bg-surface-900/40">
+                                        {['Contract', 'Side', 'Qty', 'Avg Price', 'LTP', 'P&L', 'Value'].map((h) => (
+                                            <th key={h} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase text-left">{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {positions.map((p) => {
+                                        const q = quotes[p.contract_symbol] ?? {};
+                                        const ltp = q.ltp ?? p.average_price ?? 0;
+                                        const pnl = (ltp - p.average_price) * p.quantity * (p.side === 'SELL' ? -1 : 1);
+                                        return (
+                                            <tr key={p.id} className="border-b border-edge/5 hover:bg-overlay/[0.03]">
+                                                <td className="px-4 py-3 font-mono text-xs font-semibold text-heading">{p.contract_symbol}</td>
+                                                <td className={cn('px-4 py-3 text-xs font-bold', p.side === 'BUY' ? 'text-bull' : 'text-bear')}>{p.side}</td>
+                                                <td className="px-4 py-3 text-xs tabular-nums text-heading">{formatQuantity(p.quantity)}</td>
+                                                <td className="px-4 py-3 text-xs tabular-nums text-heading">₹{formatPrice(p.average_price)}</td>
+                                                <td className="px-4 py-3 text-xs tabular-nums text-heading">{ltp ? `₹${formatPrice(ltp)}` : '—'}</td>
+                                                <td className={cn('px-4 py-3 text-xs tabular-nums font-semibold', pnl >= 0 ? 'text-bull' : 'text-bear')}>
+                                                    {chg(pnl)}
+                                                </td>
+                                                <td className="px-4 py-3 text-xs tabular-nums text-gray-400">{formatCurrency(ltp * p.quantity)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )
+                )}
+
+                {bottomTab === 'orders' && (
+                    orders.length === 0 ? (
+                        <div className="flex items-center justify-center py-12 text-gray-500 text-sm">No orders yet</div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-edge/5 bg-surface-900/40">
+                                        {['Contract', 'Side', 'Type', 'Qty', 'Price', 'Status', 'Time', ''].map((h) => (
+                                            <th key={h} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase text-left">{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {orders.map((o) => (
+                                        <tr key={o.id} className="border-b border-edge/5 hover:bg-overlay/[0.03]">
+                                            <td className="px-4 py-3 font-mono text-xs font-semibold text-heading">{o.contract_symbol}</td>
+                                            <td className={cn('px-4 py-3 text-xs font-bold', o.side === 'BUY' ? 'text-bull' : 'text-bear')}>{o.side}</td>
+                                            <td className="px-4 py-3 text-xs text-gray-400">{o.order_type}</td>
+                                            <td className="px-4 py-3 text-xs tabular-nums text-heading">{formatQuantity(o.quantity)}</td>
+                                            <td className="px-4 py-3 text-xs tabular-nums text-heading">
+                                                {o.filled_price != null ? `₹${formatPrice(o.filled_price)}` : o.price != null ? `₹${formatPrice(o.price)}` : 'MKT'}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className={cn(
+                                                    'text-[10px] font-bold px-2 py-0.5 rounded-full',
+                                                    o.status === 'FILLED'    ? 'bg-bull/15 text-bull' :
+                                                    o.status === 'OPEN'      ? 'bg-primary-500/15 text-primary-500' :
+                                                    o.status === 'CANCELLED' ? 'bg-gray-500/15 text-gray-400' :
+                                                    'bg-amber-500/15 text-amber-500'
+                                                )}>{o.status}</span>
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                                                {o.created_at ? new Date(o.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {o.status === 'OPEN' && (
+                                                    <button
+                                                        onClick={() => handleCancelOrder(o.id)}
+                                                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-bear/10 text-bear hover:bg-bear/20 transition-colors"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )
+                )}
+            </div>
+
+            {/* ── Order modal ── */}
+            <OrderModal
+                isOpen={orderModal.open}
+                onClose={() => setOrderModal({ open: false, contract: null })}
+                contract={orderModal.contract}
+                spotPrice={spot}
+                onPlaced={fetchPositionsOrders}
             />
         </div>
-    );
-}
-
-/** Standard View: Price, Volume, OI */
-function StandardView({ rows, spot, onOrderPopup }) {
-    return (
-        <>
-            <div className="grid grid-cols-[1fr_0.8fr_0.8fr_0.6fr_0.8fr_0.8fr_1fr] gap-px bg-edge/10">
-                {/* Headers */}
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Call IV</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Call LTP</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Call Vol</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Strike</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Put Vol</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Put LTP</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Put IV</div>
-            </div>
-
-            {rows.map((row) => (
-                <div
-                    key={row.strike}
-                    className={cn(
-                        'grid grid-cols-[1fr_0.8fr_0.8fr_0.6fr_0.8fr_0.8fr_1fr] gap-px bg-edge/10 hover:bg-primary-500/5 transition-colors',
-                        row.moneyness === 'ATM' && 'bg-amber-500/5'
-                    )}
-                >
-                    {/* Call IV */}
-                    <div className="bg-surface-900/60 px-3 py-2.5 text-xs text-gray-400 text-center">{row.callIV}%</div>
-
-                    {/* Call LTP */}
-                    <div className="bg-surface-900/60 px-3 py-2.5 text-center">
-                        <p className="text-sm font-semibold text-heading">{formatPrice(row.callLtp)}</p>
-                        <p className={cn('text-[10px] font-medium', row.callChange >= 0 ? 'text-profit' : 'text-loss')}>
-                            {row.callChange >= 0 ? '+' : ''}{row.callChange.toFixed(2)}
-                        </p>
-                    </div>
-
-                    {/* Call Volume */}
-                    <div className="bg-surface-900/60 px-3 py-2.5 text-xs text-gray-400 text-center">{(row.callVolume / 1000).toFixed(1)}K</div>
-
-                    {/* Strike */}
-                    <div className={cn('px-3 py-2.5 text-center relative', getMoneynessBgColor(row.moneyness))}>
-                        <span className="text-sm font-bold text-heading">{formatPrice(row.strike)}</span>
-                        <span className={cn('absolute -top-1 -right-1 px-1.5 py-0.5 rounded text-[8px] font-bold', getMoneynessBadgeColor(row.moneyness))}>
-                            {row.moneyness}
-                        </span>
-                    </div>
-
-                    {/* Put Volume */}
-                    <div className="bg-surface-900/60 px-3 py-2.5 text-xs text-gray-400 text-center">{(row.putVolume / 1000).toFixed(1)}K</div>
-
-                    {/* Put LTP */}
-                    <div className="bg-surface-900/60 px-3 py-2.5 text-center">
-                        <p className="text-sm font-semibold text-heading">{formatPrice(row.putLtp)}</p>
-                        <p className={cn('text-[10px] font-medium', row.putChange >= 0 ? 'text-profit' : 'text-loss')}>
-                            {row.putChange >= 0 ? '+' : ''}{row.putChange.toFixed(2)}
-                        </p>
-                    </div>
-
-                    {/* Put IV */}
-                    <div className="bg-surface-900/60 px-3 py-2.5 text-xs text-gray-400 text-center">{row.putIV}%</div>
-                </div>
-            ))}
-        </>
-    );
-}
-
-/** Greeks View: Delta, Gamma, Vega, Theta */
-function GreeksView({ rows, spot, onOrderPopup }) {
-    return (
-        <>
-            <div className="grid grid-cols-[1fr_0.7fr_0.7fr_0.7fr_0.7fr_0.6fr_0.7fr_0.7fr_0.7fr_0.7fr_1fr] gap-px bg-edge/10">
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Δ</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Γ</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Θ</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">ν</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Vol</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Strike</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Vol</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">ν</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Θ</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Γ</div>
-                <div className="bg-surface-900 px-2 py-2.5 text-[10px] font-bold text-gray-500 uppercase text-center">Δ</div>
-            </div>
-
-            {rows.map((row) => (
-                <div key={row.strike} className="grid grid-cols-[1fr_0.7fr_0.7fr_0.7fr_0.7fr_0.6fr_0.7fr_0.7fr_0.7fr_0.7fr_1fr] gap-px bg-edge/10 hover:bg-primary-500/5">
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs font-mono text-center">{row.callDelta}</div>
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs font-mono text-center">{row.callGamma}</div>
-                    <div className={cn('px-2 py-2 text-xs font-mono text-center', row.callTheta < 0 ? 'text-loss' : 'text-profit')}>{row.callTheta}</div>
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs font-mono text-center">{row.callVega}</div>
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs text-center text-gray-500">{(row.callVolume / 1000).toFixed(0)}K</div>
-                    <div className={cn('px-2 py-2 text-xs font-bold text-center', getMoneynessBgColor(row.moneyness))}>{formatPrice(row.strike)}</div>
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs text-center text-gray-500">{(row.putVolume / 1000).toFixed(0)}K</div>
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs font-mono text-center">{row.putVega}</div>
-                    <div className={cn('px-2 py-2 text-xs font-mono text-center', row.putTheta < 0 ? 'text-loss' : 'text-profit')}>{row.putTheta}</div>
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs font-mono text-center">{row.putGamma}</div>
-                    <div className="bg-surface-900/60 px-2 py-2 text-xs font-mono text-center">{row.putDelta}</div>
-                </div>
-            ))}
-        </>
-    );
-}
-
-/** IV View: Implied Volatility Analysis */
-function IVView({ rows, spot, onOrderPopup }) {
-    const maxIV = Math.max(...rows.map((r) => Math.max(parseFloat(r.callIV), parseFloat(r.putIV))));
-
-    return (
-        <>
-            <div className="grid grid-cols-[1fr_1fr_1fr_0.6fr_1fr_1fr_1fr] gap-px bg-edge/10">
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Call IV</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">IV Chart</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">IV Skew</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Strike</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">IV Skew</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">IV Chart</div>
-                <div className="bg-surface-900 px-3 py-2.5 text-xs font-bold text-gray-500 uppercase text-center">Put IV</div>
-            </div>
-
-            {rows.map((row) => {
-                const callIVRatio = parseFloat(row.callIV) / maxIV;
-                const putIVRatio = parseFloat(row.putIV) / maxIV;
-                const ivSkew = (parseFloat(row.putIV) - parseFloat(row.callIV)).toFixed(2);
-
-                return (
-                    <div key={row.strike} className="grid grid-cols-[1fr_1fr_1fr_0.6fr_1fr_1fr_1fr] gap-px bg-edge/10 hover:bg-primary-500/5">
-                        {/* Call IV */}
-                        <div className="bg-surface-900/60 px-3 py-2.5 text-sm font-mono text-heading text-center">{row.callIV}%</div>
-
-                        {/* Call IV Chart */}
-                        <div className="bg-surface-900/60 px-3 py-2.5 flex items-center justify-center">
-                            <div className="w-full h-5 bg-surface-800 rounded-sm relative overflow-hidden">
-                                <div
-                                    className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-sm"
-                                    style={{ width: `${callIVRatio * 100}%` }}
-                                />
-                            </div>
-                        </div>
-
-                        {/* IV Skew Call */}
-                        <div className={cn('px-3 py-2.5 text-xs font-mono text-center', ivSkew < 0 ? 'text-blue-400' : ivSkew > 0 ? 'text-red-400' : 'text-gray-400')}>
-                            {ivSkew}
-                        </div>
-
-                        {/* Strike */}
-                        <div className={cn('px-3 py-2.5 text-sm font-bold text-center', getMoneynessBgColor(row.moneyness))}>{formatPrice(row.strike)}</div>
-
-                        {/* IV Skew Put */}
-                        <div className={cn('px-3 py-2.5 text-xs font-mono text-center', ivSkew < 0 ? 'text-blue-400' : ivSkew > 0 ? 'text-red-400' : 'text-gray-400')}>
-                            {ivSkew}
-                        </div>
-
-                        {/* Put IV Chart */}
-                        <div className="bg-surface-900/60 px-3 py-2.5 flex items-center justify-center">
-                            <div className="w-full h-5 bg-surface-800 rounded-sm relative overflow-hidden">
-                                <div
-                                    className="h-full bg-gradient-to-r from-red-500 to-orange-500 rounded-sm"
-                                    style={{ width: `${putIVRatio * 100}%` }}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Put IV */}
-                        <div className="bg-surface-900/60 px-3 py-2.5 text-sm font-mono text-heading text-center">{row.putIV}%</div>
-                    </div>
-                );
-            })}
-        </>
     );
 }
