@@ -4,6 +4,8 @@ import Tooltip from "../ui/Tooltip";
 import { cn } from "../../utils/cn";
 import { SIDEBAR_EXPANDED_W, SIDEBAR_COLLAPSED_W } from "../../utils/constants";
 import {
+  Menu,
+  ChevronLeft,
   LayoutDashboard,
   ChartCandlestick,
   Briefcase,
@@ -156,7 +158,7 @@ function SectionLabel({ label, collapsed }) {
   );
 }
 
-export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeave }) {
+export default function Sidebar({ collapsed, onToggle }) {
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user); // reactive — updates instantly on photo change
   const navigate = useNavigate();
@@ -179,12 +181,10 @@ export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeav
 
       <aside
         style={{ width: collapsed ? SIDEBAR_COLLAPSED_W : SIDEBAR_EXPANDED_W }}
-        onMouseEnter={onHoverEnter}
-        onMouseLeave={onHoverLeave}
         className={cn(
           "fixed left-0 top-0 h-screen z-40 flex flex-col",
           "bg-[var(--bg-base)] border-r border-edge/10",
-          "transition-[width] duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
+          "transition-[width] duration-[250ms] ease-in-out overflow-hidden",
           collapsed
             ? "max-lg:-translate-x-full"
             : "max-lg:translate-x-0 max-lg:w-[240px]",
@@ -195,10 +195,22 @@ export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeav
           className={cn(
             "flex-shrink-0 transition-all duration-300",
             collapsed
-              ? "flex flex-col items-center gap-1 py-2.5 px-2"
+              ? "flex flex-col items-center gap-2 py-2.5 px-2"
               : "flex flex-col gap-0.5 justify-center h-20 px-4",
           )}
         >
+          {collapsed && (
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+              className="p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
+
           <div className="flex items-center justify-between w-full">
             {collapsed ? (
               <a href="https://www.alphasync.app/">
@@ -209,13 +221,24 @@ export default function Sidebar({ collapsed, onToggle, onHoverEnter, onHoverLeav
                 />
               </a>
             ) : (
-              <a href="https://www.alphasync.app/" className="block min-w-0 flex-1">
-                <img
-                  src="/logo-full.png"
-                  alt="AlphaSync"
-                  className="h-14 max-w-[180px] object-contain object-left transition-all duration-300 logo-light-adapt"
-                />
-              </a>
+              <>
+                <a href="https://www.alphasync.app/" className="block min-w-0 flex-1">
+                  <img
+                    src="/logo-full.png"
+                    alt="AlphaSync"
+                    className="h-14 max-w-[180px] object-contain object-left transition-all duration-300 logo-light-adapt"
+                  />
+                </a>
+                <button
+                  type="button"
+                  onClick={onToggle}
+                  aria-label="Collapse sidebar"
+                  title="Collapse sidebar"
+                  className="p-2 rounded-lg text-gray-400 hover:text-heading hover:bg-overlay/5 transition-all duration-300"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+              </>
             )}
           </div>
           {/* Tagline — only visible when collapsed (expanded version is inline with logo) */}
