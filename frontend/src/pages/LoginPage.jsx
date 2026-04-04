@@ -58,6 +58,8 @@ export default function LoginPage() {
   const [phoneError, setPhoneError] = useState("");
   const [countdown, setCountdown] = useState(0);
   const countdownRef = useRef(null);
+  const [otpChannel, setOtpChannel] = useState("sms"); // "sms" | "email"
+  const [otpDeliveryHint, setOtpDeliveryHint] = useState("");
 
   const loginWithEmail = useAuthStore((s) => s.loginWithEmail);
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
@@ -114,6 +116,11 @@ export default function LoginPage() {
 
   // ── Phone gate: show modal if user has no phone, otherwise route ─────
   const handleAuthSuccess = (profile) => {
+    // Admin users bypass the phone gate entirely
+    if ((profile?.role || "").toLowerCase() === "admin") {
+      routeByAccountStatus(profile);
+      return;
+    }
     if (!profile?.phone) {
       setPendingProfile(profile);
       setPhoneValue("");
@@ -121,6 +128,8 @@ export default function LoginPage() {
       setPhoneError("");
       setPhoneStep("enter");
       setCountdown(0);
+      setOtpChannel("sms");
+      setOtpDeliveryHint("");
       setShowPhoneModal(true);
     } else {
       routeByAccountStatus(profile);
@@ -136,11 +145,16 @@ export default function LoginPage() {
     setPhoneError("");
     setPhoneLoading(true);
     try {
-      await sendPhoneOtp(phoneValue);
+      const res = await sendPhoneOtp(phoneValue);
+      setOtpChannel(res?.channel || "sms");
+      setOtpDeliveryHint(res?.delivery_hint || "");
       setOtpValue("");
       setPhoneStep("verify");
       startCountdown(60);
-      toast.success("OTP sent! Check your SMS.");
+      const dest = res?.channel === "email"
+        ? `your email (${res?.delivery_hint || "inbox"})`
+        : "your mobile via SMS";
+      toast.success(`OTP sent to ${dest}!`);
     } catch (err) {
       setPhoneError(
         err?.response?.data?.detail || err?.message || "Failed to send OTP. Try again."
@@ -156,7 +170,9 @@ export default function LoginPage() {
     setPhoneError("");
     setPhoneLoading(true);
     try {
-      await sendPhoneOtp(phoneValue);
+      const res = await sendPhoneOtp(phoneValue);
+      setOtpChannel(res?.channel || "sms");
+      setOtpDeliveryHint(res?.delivery_hint || "");
       setOtpValue("");
       startCountdown(60);
       toast.success("OTP resent!");
@@ -172,7 +188,7 @@ export default function LoginPage() {
   // Step 2 — verify OTP and save
   const handleVerifyOtp = async () => {
     if (otpValue.length !== 6) {
-      setPhoneError("Enter the 6-digit OTP sent to your mobile.");
+      setPhoneError(`Enter the 6-digit OTP sent to your ${otpChannel === "email" ? "email" : "mobile"}.`);
       return;
     }
     setPhoneError("");
@@ -481,21 +497,22 @@ export default function LoginPage() {
                     width: 52, height: 52, borderRadius: 16, flexShrink: 0,
                     background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.25)",
                     display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem",
-                  }}>💬</div>
+                  }}>{otpChannel === "email" ? "📧" : "💬"}</div>
                   <div>
                     <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800 }}>Enter your OTP</h2>
                     <p style={{ margin: ".2rem 0 0", fontSize: ".8rem", color: "#94a3b8" }}>
-                      Sent to +91&nbsp;
-                      <span style={{ color: "#06b6d4", fontWeight: 700, fontFamily: "monospace" }}>
-                        {"*".repeat(6)}{phoneValue.slice(-4)}
-                      </span>
+                      {otpChannel === "email" ? (
+                        <>Sent to email&nbsp;<span style={{ color: "#06b6d4", fontWeight: 700 }}>{otpDeliveryHint}</span></>
+                      ) : (
+                        <>Sent to +91&nbsp;<span style={{ color: "#06b6d4", fontWeight: 700, fontFamily: "monospace" }}>{"*".repeat(6)}{phoneValue.slice(-4)}</span></>
+                      )}
                     </p>
                   </div>
                 </div>
 
                 <p style={{ fontSize: ".83rem", color: "#cbd5e1", lineHeight: 1.6, marginBottom: "1.5rem" }}>
-                  Enter the <strong style={{ color: "#10b981" }}>6-digit OTP</strong> we just sent via SMS. It
-                  expires in <strong>10 minutes</strong>.
+                  Enter the <strong style={{ color: "#10b981" }}>6-digit OTP</strong> we just sent
+                  via {otpChannel === "email" ? "email" : "SMS"}. It expires in <strong>10 minutes</strong>.
                 </p>
 
                 <label style={{ display: "block", fontSize: ".72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "#64748b", marginBottom: ".5rem" }}>

@@ -331,7 +331,7 @@ export const useAuthStore = create((set, get) => ({
      */
     sendPhoneOtp: async (phone) => {
         const response = await api.post('/auth/send-phone-otp', { phone });
-        return response.data;
+        return response.data; // { message, expires_in, cooldown, channel, delivery_hint }
     },
 
     /**

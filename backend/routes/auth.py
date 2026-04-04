@@ -571,17 +571,20 @@ def _require_firebase_uid(credentials) -> str:
 async def send_phone_otp(
     req: SendPhoneOTPRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Step 1 — send a 6-digit OTP to the supplied Indian mobile number.
 
-    OTP is stored in Redis (TTL 10 min) and dispatched via Fast2SMS.
-    In development (FAST2SMS_API_KEY not set) the OTP is only logged
-    so the full flow can be tested without an SMS account.
+    If FAST2SMS_API_KEY is configured the OTP is delivered via SMS.
+    Otherwise it falls back to the user's registered email address so
+    the flow is fully testable without an SMS account.
 
     Rate limits: max 5 sends per phone per hour; 60 s cooldown between sends.
     """
     from services.otp_service import generate_and_store_otp, send_otp_sms
+    from services.email_service import send_phone_otp_email
+    from config.settings import settings
 
     firebase_uid = _require_firebase_uid(credentials)
 
@@ -598,18 +601,44 @@ async def send_phone_otp(
     if not ok:
         raise HTTPException(status_code=429, detail=err)
 
-    sms_sent = await send_otp_sms(phone_10, otp)
-    if not sms_sent:
-        raise HTTPException(
-            status_code=503,
-            detail="Could not send OTP SMS right now. Please try again shortly.",
-        )
+    if settings.FAST2SMS_API_KEY:
+        # Production path — real SMS delivery
+        sms_sent = await send_otp_sms(phone_10, otp)
+        if not sms_sent:
+            raise HTTPException(
+                status_code=503,
+                detail="Could not send OTP SMS right now. Please try again shortly.",
+            )
+        channel = "sms"
+        delivery_hint = f"+91{'*' * 6}{phone_10[-4:]}"
+        logger.info("OTP dispatched via SMS to +91%s for uid=%s", phone_10, firebase_uid[:8])
+    else:
+        # Development / no-SMS fallback — send via registered email
+        result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found. Please complete registration first.")
 
-    logger.info("OTP dispatched to +91%s for uid=%s", phone_10, firebase_uid[:8])
+        email_sent = await send_phone_otp_email(user.email, otp, phone_10[-4:])
+        if not email_sent:
+            raise HTTPException(
+                status_code=503,
+                detail="Could not send OTP email right now. Please try again shortly.",
+            )
+        channel = "email"
+        # Mask email: ab***@gmail.com
+        parts = user.email.split("@")
+        local = parts[0]
+        masked_local = local[:2] + "***" if len(local) > 2 else local[0] + "***"
+        delivery_hint = f"{masked_local}@{parts[1]}" if len(parts) == 2 else user.email
+        logger.info("OTP dispatched via email to %s for uid=%s", delivery_hint, firebase_uid[:8])
+
     return {
-        "message": f"OTP sent to +91{'*' * 6}{phone_10[-4:]}. Valid for 10 minutes.",
+        "message": f"OTP sent. Valid for 10 minutes.",
         "expires_in": 600,
-        "cooldown":   60,
+        "cooldown": 60,
+        "channel": channel,
+        "delivery_hint": delivery_hint,
     }
 
 

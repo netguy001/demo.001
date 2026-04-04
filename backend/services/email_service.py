@@ -226,6 +226,66 @@ def send_access_expired_email(user):
     )
 
 
+async def send_phone_otp_email(to_email: str, otp: str, phone_last4: str) -> bool:
+    """
+    Send the phone-verification OTP via email.
+
+    Used as a reliable fallback when FAST2SMS_API_KEY is not configured.
+    The OTP is the same 6-digit code that would have gone to SMS — the user
+    simply checks their inbox instead of their SMS app.
+    """
+    html = f"""
+    <html>
+    <body style="font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:40px 20px;margin:0">
+    <div style="max-width:520px;margin:0 auto;background:#1e293b;border-radius:16px;
+                border:1px solid rgba(6,182,212,0.2);overflow:hidden">
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#06b6d4,#0284c7);padding:28px 32px">
+            <div style="font-size:1.5rem;font-weight:800;color:#fff;letter-spacing:-.02em">
+                AlphaSync
+            </div>
+            <div style="font-size:.85rem;color:rgba(255,255,255,.75);margin-top:4px">
+                Mobile Verification OTP
+            </div>
+        </div>
+        <!-- Body -->
+        <div style="padding:32px">
+            <p style="margin:0 0 20px;font-size:.95rem;color:#cbd5e1;line-height:1.65">
+                Your one-time password (OTP) for verifying the mobile number
+                ending in <strong style="color:#06b6d4">••••{phone_last4}</strong> is:
+            </p>
+            <!-- OTP box -->
+            <div style="text-align:center;margin:24px 0">
+                <div style="display:inline-block;background:#0f172a;border:2px solid #06b6d4;
+                            border-radius:14px;padding:20px 40px">
+                    <span style="font-family:'Courier New',monospace;font-size:2.8rem;
+                                 font-weight:900;letter-spacing:.35em;color:#06b6d4">
+                        {otp}
+                    </span>
+                </div>
+            </div>
+            <p style="margin:0 0 8px;font-size:.82rem;color:#64748b;text-align:center">
+                ⏱ Valid for <strong>10 minutes</strong> &nbsp;·&nbsp;
+                🔒 Do not share this OTP with anyone
+            </p>
+            <hr style="border:none;border-top:1px solid rgba(255,255,255,.07);margin:24px 0">
+            <p style="margin:0;font-size:.78rem;color:#475569;line-height:1.6">
+                If you did not request this OTP, please ignore this email.
+                Your account remains secure.
+            </p>
+        </div>
+        <!-- Footer -->
+        <div style="background:#0f172a;padding:16px 32px;
+                    font-size:.73rem;color:#334155;text-align:center">
+            © AlphaSync &nbsp;·&nbsp; This is an automated message — do not reply.
+        </div>
+    </div>
+    </body>
+    </html>
+    """
+    return await _send_smtp(to_email, "AlphaSync — Your Mobile Verification OTP", html)
+
+
 def send_access_duration_updated_email(
     user,
     duration_days: int,
