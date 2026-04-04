@@ -26,12 +26,12 @@ const getPriceForSymbol = (primaryPrices, fallbackPrices, symbol) => {
         : [withNs, upper, withoutNs];
 
     for (const key of candidates) {
-        const quote = primaryPrices[key];
+        const quote = fallbackPrices[key];
         if (quote?.price != null) return quote;
     }
 
     for (const key of candidates) {
-        const quote = fallbackPrices[key];
+        const quote = primaryPrices[key];
         if (quote?.price != null) return quote;
     }
 

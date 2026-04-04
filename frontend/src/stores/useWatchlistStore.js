@@ -523,14 +523,26 @@ export const useWatchlistStore = create((set, get) => ({
             const keyWithNs = ensureNsSuffix(upperKey);
             const keyWithoutNs = stripExchangeSuffix(upperKey);
 
-            if (upperKey) normalizedQuotes[upperKey] = quote;
-            if (keyWithNs) normalizedQuotes[keyWithNs] = quote;
-            if (keyWithoutNs) normalizedQuotes[keyWithoutNs] = quote;
-
             const quoteSymbol = String(quote.symbol || '').toUpperCase();
+            const quoteWithNs = quoteSymbol ? ensureNsSuffix(quoteSymbol) : '';
+            const quoteWithoutNs = quoteSymbol ? stripExchangeSuffix(quoteSymbol) : '';
+            const hasSymbolMismatch = Boolean(
+                quoteSymbol &&
+                keyWithoutNs &&
+                quoteWithoutNs &&
+                keyWithoutNs !== quoteWithoutNs
+            );
+
+            // Trust the transport key only when it matches quote.symbol (or quote.symbol is absent).
+            // This prevents wrong key→quote pairings from batch endpoints from polluting watchlist rows
+            // with fake prices until user clicks each symbol.
+            if (!hasSymbolMismatch) {
+                if (upperKey) normalizedQuotes[upperKey] = quote;
+                if (keyWithNs) normalizedQuotes[keyWithNs] = quote;
+                if (keyWithoutNs) normalizedQuotes[keyWithoutNs] = quote;
+            }
+
             if (quoteSymbol) {
-                const quoteWithNs = ensureNsSuffix(quoteSymbol);
-                const quoteWithoutNs = stripExchangeSuffix(quoteSymbol);
                 normalizedQuotes[quoteSymbol] = quote;
                 if (quoteWithNs) normalizedQuotes[quoteWithNs] = quote;
                 if (quoteWithoutNs) normalizedQuotes[quoteWithoutNs] = quote;
